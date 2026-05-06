@@ -15,6 +15,7 @@ WHATSAPP_PROVIDER=mock
 META_ACCESS_TOKEN=
 META_PHONE_NUMBER_ID=
 META_VERIFY_TOKEN=agentkit-verify
+META_APP_SECRET=
 META_GRAPH_VERSION=v20.0
 PORT=8000
 MEMORY_PATH=./agent_memory.json
@@ -76,3 +77,48 @@ curl -X POST http://127.0.0.1:8000/webhook \
 - Agregar Twilio si se decide usarlo.
 - Implementar human takeover operativo.
 - Deploy y webhooks de produccion.
+
+## Deploy seguro
+
+Variables requeridas en produccion:
+
+```bash
+ENVIRONMENT=production
+PORT=8000
+
+CRM_API_URL=https://TU-CRM.com
+CRM_API_KEY=secret_del_crm_bridge
+
+ANTHROPIC_API_KEY=sk-ant...
+ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+
+WHATSAPP_PROVIDER=meta
+META_ACCESS_TOKEN=token_de_whatsapp_cloud_api
+META_PHONE_NUMBER_ID=id_del_numero
+META_VERIFY_TOKEN=token_para_verificar_webhook
+META_APP_SECRET=app_secret_de_meta
+META_GRAPH_VERSION=v20.0
+
+MEMORY_PATH=/app/data/agent_memory.json
+```
+
+Healthcheck:
+
+```bash
+GET https://TU-BOT.com/health
+```
+
+Webhook en Meta:
+
+```text
+Callback URL: https://TU-BOT.com/webhook
+Verify token: mismo valor de META_VERIFY_TOKEN
+Campo: messages
+```
+
+Seguridad:
+
+- `POST /webhook` exige `X-Hub-Signature-256` cuando `WHATSAPP_PROVIDER=meta`.
+- La firma se valida con HMAC SHA256 usando `META_APP_SECRET`.
+- No subas `.env` ni tokens al repo.
+- Los logs/respuestas no deben mostrar tokens ni telefono completo.

@@ -6,6 +6,7 @@ service once provider credentials are configured in W3/W4.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -18,6 +19,7 @@ from .config import load_settings
 from .crm_client import CRMClient, CRMClientError
 from .memory import ConversationMemory
 from .providers import WhatsAppProviderError, build_provider
+from .security import mask_phone, verify_meta_signature
 from .tools import CRMSalesTools
 
 
@@ -89,7 +91,19 @@ def verify_webhook(request: Request) -> PlainTextResponse:
 
 @app.post("/webhook")
 async def receive_webhook(request: Request) -> dict[str, Any]:
-    payload = await request.json()
+    body = await request.body()
+    if settings.whatsapp_provider == "meta":
+        signature = request.headers.get("X-Hub-Signature-256")
+        if not verify_meta_signature(body, signature, settings.meta_app_secret):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
+
     inbound = whatsapp_provider.parse_webhook(payload)
     if not inbound:
         return {"ok": True, "ignored": True}
@@ -110,6 +124,7 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
     return {
         "ok": True,
         "provider": whatsapp_provider.name,
+        "phone": mask_phone(inbound.phone),
         "intent": reply.intent,
         "handoff": reply.handoff,
         "leadId": (reply.lead or {}).get("id"),

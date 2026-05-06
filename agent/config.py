@@ -25,6 +25,7 @@ class Settings:
     meta_access_token: str
     meta_phone_number_id: str
     meta_verify_token: str
+    meta_app_secret: str
     meta_graph_version: str
 
     @property
@@ -34,7 +35,12 @@ class Settings:
     @property
     def whatsapp_ready(self) -> bool:
         if self.whatsapp_provider == "meta":
-            return bool(self.meta_access_token and self.meta_phone_number_id and self.meta_verify_token)
+            return bool(
+                self.meta_access_token
+                and self.meta_phone_number_id
+                and self.meta_verify_token
+                and self.meta_app_secret
+            )
         return True
 
 
@@ -59,5 +65,6 @@ def load_settings() -> Settings:
         meta_access_token=_env("META_ACCESS_TOKEN"),
         meta_phone_number_id=_env("META_PHONE_NUMBER_ID"),
         meta_verify_token=_env("META_VERIFY_TOKEN", "agentkit-verify"),
+        meta_app_secret=_env("META_APP_SECRET"),
         meta_graph_version=_env("META_GRAPH_VERSION", "v20.0"),
     )

@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from agent.brain import ClaudeSalesBrain
 from agent.memory import ConversationMemory
 from agent.providers import MetaWhatsAppProvider, MockWhatsAppProvider
+from agent.security import mask_phone, sign_meta_payload, verify_meta_signature
 from agent.seller_agent import ClubCommerceSellerAgent
 from agent.tools import CRMSalesTools
 
@@ -264,11 +265,26 @@ def test_w4_meta_provider_parse() -> None:
     print("W4 Meta provider parse simulation OK")
 
 
+def test_w5_meta_signature_security() -> None:
+    body = b'{"entry":[{"changes":[{"value":{"messages":[]}}]}]}'
+    secret = "app-secret-for-test"
+    signature = sign_meta_payload(body, secret)
+    assert verify_meta_signature(body, signature, secret) is True
+    assert verify_meta_signature(body, "sha256=bad", secret) is False
+    assert verify_meta_signature(body, signature, "wrong-secret") is False
+    assert verify_meta_signature(body, None, secret) is False
+    assert verify_meta_signature(body, signature, "") is False
+    assert mask_phone("+1 (786) 555-0100") == "***0100"
+
+    print("W5 Meta signature security simulation OK")
+
+
 def main() -> None:
     test_w2_fallback_agent()
     test_w3_claude_brain()
     test_w4_mock_provider()
     test_w4_meta_provider_parse()
+    test_w5_meta_signature_security()
 
 
 if __name__ == "__main__":

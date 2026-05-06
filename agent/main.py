@@ -54,6 +54,24 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/debug/config")
+def debug_config() -> dict[str, Any]:
+    """Non-secret runtime config for production dry runs."""
+    return {
+        "ok": True,
+        "provider": settings.whatsapp_provider,
+        "crmConfigured": settings.crm_ready,
+        "claudeConfigured": anthropic_client.ready,
+        "metaConfigured": bool(
+            settings.meta_access_token
+            and settings.meta_phone_number_id
+            and settings.meta_verify_token
+            and settings.meta_app_secret
+        ),
+        "graphVersion": settings.meta_graph_version,
+    }
+
+
 @app.post("/simulate")
 def simulate(payload: SimulateMessage) -> dict[str, Any]:
     try:

@@ -1,14 +1,17 @@
-"""Local W2 simulation without WhatsApp, FastAPI, or real CRM credentials."""
+"""Local W2/W3 simulation without WhatsApp, FastAPI, or real CRM credentials."""
 
 from __future__ import annotations
 
 import pathlib
 import sys
+import tempfile
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from agent.brain import ClaudeSalesBrain
+from agent.memory import ConversationMemory
 from agent.seller_agent import ClubCommerceSellerAgent
 from agent.tools import CRMSalesTools
 
@@ -84,7 +87,38 @@ class FakeCRMClient:
         }
 
 
-def main() -> None:
+class FakeAnthropic:
+    ready = True
+
+    def complete(self, system: str, messages: list[dict[str, str]], max_tokens: int = 900) -> str:
+        last = messages[-1]["content"].casefold()
+        if "comprar" in last or "link" in last:
+            return (
+                '{"reply":"Perfecto, te conecto con un closer del equipo para avanzar con el pago.",'
+                '"intent":"ready_for_handoff","handoff":true,"needsFollowUp":false,'
+                '"followUpNote":"Handoff por intencion fuerte","followUpMinutes":15,"stage":"interesado"}'
+            )
+        if "precio" in last or "cuanto" in last:
+            assert "100X Academy" in system
+            return (
+                '{"reply":"Tenemos 100X Academy, PRO y ELITE. Cual quieres revisar primero?",'
+                '"intent":"pricing","handoff":false,"needsFollowUp":true,'
+                '"followUpNote":"Enviar detalle de planes","followUpMinutes":180,"stage":"interesado"}'
+            )
+        if "caro" in last:
+            return (
+                '{"reply":"Te entiendo. Buscas empezar con lo mas accesible o quieres avanzar mas rapido?",'
+                '"intent":"price_objection","handoff":false,"needsFollowUp":true,'
+                '"followUpNote":"Objecion de precio","followUpMinutes":1440,"stage":"conversacion"}'
+            )
+        return (
+            '{"reply":"Claro, te ayudo. Ya tienes tienda online o estas empezando desde cero?",'
+            '"intent":"discovery","handoff":false,"needsFollowUp":true,'
+            '"followUpNote":"Calificar lead nuevo","followUpMinutes":1440,"stage":"conversacion"}'
+        )
+
+
+def test_w2_fallback_agent() -> None:
     fake = FakeCRMClient()
     agent = ClubCommerceSellerAgent(CRMSalesTools(fake))
 
@@ -103,6 +137,38 @@ def main() -> None:
     print(f"Handoff reply: {handoff.message}")
 
 
+def test_w3_claude_brain() -> None:
+    fake = FakeCRMClient()
+    tools = CRMSalesTools(fake)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        memory = ConversationMemory(str(pathlib.Path(temp_dir) / "memory.json"))
+        brain = ClaudeSalesBrain(tools, memory, FakeAnthropic())
+
+        first = brain.handle_message("+1 (786) 555-0100", "Hola, quiero info", "Adrian Test")
+        assert first.intent == "discovery"
+        assert "tienda" in first.message
+
+        pricing = brain.handle_message("+1 (786) 555-0100", "Que precio tienen?", "Adrian Test")
+        assert pricing.intent == "pricing"
+        assert "100X" in pricing.message
+        assert fake.followups, "pricing should create follow-up"
+
+        objection = brain.handle_message("+1 (786) 555-0100", "Se me hace caro", "Adrian Test")
+        assert objection.intent == "price_objection"
+
+        handoff = brain.handle_message("+1 (786) 555-0100", "Quiero comprar, pasame el link", "Adrian Test")
+        assert handoff.handoff is True
+        assert fake.handoffs, "strong intent should request human handoff"
+        assert len(memory.load("+1 (786) 555-0100")) >= 6
+
+    print("W3 Claude brain simulation OK")
+    print(f"Brain handoff reply: {handoff.message}")
+
+
+def main() -> None:
+    test_w2_fallback_agent()
+    test_w3_claude_brain()
+
+
 if __name__ == "__main__":
     main()
-

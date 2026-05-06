@@ -1,4 +1,6 @@
 .env
+agent_memory.json
+*.memory.json
 __pycache__/
 *.py[cod]
 *.db
@@ -9,4 +11,3 @@ venv/
 dist/
 build/
 .DS_Store
-

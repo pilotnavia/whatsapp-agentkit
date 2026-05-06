@@ -11,18 +11,22 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from .anthropic_client import AnthropicClient
+from .brain import ClaudeSalesBrain
 from .config import load_settings
 from .crm_client import CRMClient, CRMClientError
-from .seller_agent import ClubCommerceSellerAgent
+from .memory import ConversationMemory
 from .tools import CRMSalesTools
 
 
 settings = load_settings()
 crm_client = CRMClient(settings.crm_api_url, settings.crm_api_key)
 sales_tools = CRMSalesTools(crm_client)
-seller_agent = ClubCommerceSellerAgent(sales_tools)
+memory = ConversationMemory(settings.memory_path)
+anthropic_client = AnthropicClient(settings.anthropic_api_key, settings.anthropic_model)
+seller_brain = ClaudeSalesBrain(sales_tools, memory, anthropic_client)
 
-app = FastAPI(title="Club Commerce WhatsApp Sales Agent", version="0.2.0")
+app = FastAPI(title="Club Commerce WhatsApp Sales Agent", version="0.3.0")
 
 
 class SimulateMessage(BaseModel):
@@ -39,13 +43,15 @@ def health() -> dict[str, Any]:
         "service": "club-commerce-whatsapp-agent",
         "provider": settings.whatsapp_provider,
         "crmConfigured": settings.crm_ready,
+        "claudeConfigured": anthropic_client.ready,
+        "model": settings.anthropic_model if anthropic_client.ready else "fallback-local",
     }
 
 
 @app.post("/simulate")
 def simulate(payload: SimulateMessage) -> dict[str, Any]:
     try:
-        reply = seller_agent.handle_message(
+        reply = seller_brain.handle_message(
             phone=payload.phone,
             message=payload.message,
             name=payload.name,
@@ -67,4 +73,3 @@ def simulate(payload: SimulateMessage) -> dict[str, Any]:
 def webhook_mock(payload: SimulateMessage) -> dict[str, Any]:
     """Provider-neutral mock webhook for local tests."""
     return simulate(payload)
-

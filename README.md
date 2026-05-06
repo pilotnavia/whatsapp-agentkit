@@ -114,6 +114,28 @@ Checklist completo:
 DEPLOY_CHECKLIST.md
 ```
 
+Guias por plataforma:
+
+```text
+DEPLOY_RAILWAY.md
+DEPLOY_RENDER.md
+```
+
+Start command de produccion:
+
+```bash
+uvicorn agent.main:app --host 0.0.0.0 --port $PORT
+```
+
+First live test recomendado:
+
+1. Deploy con `WHATSAPP_PROVIDER=mock`.
+2. Abrir `/health`.
+3. Probar `/simulate`.
+4. Confirmar lead en el CRM.
+5. Cambiar a `WHATSAPP_PROVIDER=meta`.
+6. Configurar Meta webhook en `/webhook`.
+
 ## W3/W4 pendientes
 
 - Activar Meta Cloud API con credenciales reales.

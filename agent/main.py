@@ -6,7 +6,7 @@ service once provider credentials are configured in W3/W4.
 
 from __future__ import annotations
 
-import json
+import logging
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -18,10 +18,12 @@ from .brain import ClaudeSalesBrain
 from .config import load_settings
 from .crm_client import CRMClient, CRMClientError
 from .memory import ConversationMemory
-from .providers import WhatsAppProviderError, build_provider
-from .security import mask_phone, verify_meta_signature
+from .providers import build_provider
 from .tools import CRMSalesTools
+from .webhook_handler import WebhookHTTPError, process_webhook_body
 
+
+logger = logging.getLogger("club_commerce.whatsapp_agent")
 
 settings = load_settings()
 crm_client = CRMClient(settings.crm_api_url, settings.crm_api_key)
@@ -39,6 +41,15 @@ class SimulateMessage(BaseModel):
     message: str = Field(..., min_length=1)
     name: str | None = None
     email: str | None = None
+
+
+@app.get("/")
+def root() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "service": "club-commerce-whatsapp-agent",
+        "health": "/health",
+    }
 
 
 @app.get("/health")
@@ -109,42 +120,18 @@ def verify_webhook(request: Request) -> PlainTextResponse:
 
 @app.post("/webhook")
 async def receive_webhook(request: Request) -> dict[str, Any]:
-    body = await request.body()
-    if settings.whatsapp_provider == "meta":
-        signature = request.headers.get("X-Hub-Signature-256")
-        if not verify_meta_signature(body, signature, settings.meta_app_secret):
-            raise HTTPException(status_code=401, detail="Invalid webhook signature")
-
     try:
-        payload = json.loads(body.decode("utf-8") or "{}")
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Invalid webhook payload")
-
-    inbound = whatsapp_provider.parse_webhook(payload)
-    if not inbound:
-        return {"ok": True, "ignored": True}
-
-    try:
-        reply = seller_brain.handle_message(
-            phone=inbound.phone,
-            message=inbound.text,
-            name=inbound.name,
-            email=inbound.email,
+        return await process_webhook_body(
+            await request.body(),
+            request.headers.get("X-Hub-Signature-256"),
+            current_settings=settings,
+            provider=whatsapp_provider,
+            brain=seller_brain,
         )
-        send_result = whatsapp_provider.send_message(inbound.phone, reply.message)
-    except CRMClientError as exc:
-        raise HTTPException(status_code=502, detail={"message": str(exc), "crmStatus": exc.status}) from exc
-    except WhatsAppProviderError as exc:
-        raise HTTPException(status_code=502, detail={"message": str(exc)}) from exc
-
-    return {
-        "ok": True,
-        "provider": whatsapp_provider.name,
-        "phone": mask_phone(inbound.phone),
-        "intent": reply.intent,
-        "handoff": reply.handoff,
-        "leadId": (reply.lead or {}).get("id"),
-        "sent": send_result.get("ok", False),
-    }
+    except WebhookHTTPError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("POST /webhook unhandled failure error=%s", type(exc).__name__)
+        return {"ok": True, "accepted": False, "error": "unhandled_webhook_error"}

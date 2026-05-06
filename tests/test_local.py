@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import pathlib
 import sys
 import tempfile
+from types import SimpleNamespace
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -13,9 +16,11 @@ sys.path.insert(0, str(ROOT))
 from agent.brain import ClaudeSalesBrain
 from agent.memory import ConversationMemory
 from agent.providers import MetaWhatsAppProvider, MockWhatsAppProvider
+from agent.providers.base import IncomingMessage, WhatsAppProviderError
 from agent.security import mask_phone, sign_meta_payload, verify_meta_signature
 from agent.seller_agent import ClubCommerceSellerAgent
 from agent.tools import CRMSalesTools
+from agent.webhook_handler import WebhookHTTPError, process_webhook_body
 
 
 class FakeCRMClient:
@@ -118,6 +123,83 @@ class FakeAnthropic:
             '"intent":"discovery","handoff":false,"needsFollowUp":true,'
             '"followUpNote":"Calificar lead nuevo","followUpMinutes":1440,"stage":"conversacion"}'
         )
+
+
+class FakeMetaProviderForWebhook:
+    name = "meta"
+
+    def __init__(self, fail_send: bool = False) -> None:
+        self.fail_send = fail_send
+        self.sent: list[dict[str, str]] = []
+
+    def parse_webhook(self, payload: dict[str, Any]) -> IncomingMessage | None:
+        try:
+            value = payload["entry"][0]["changes"][0]["value"]
+            message = value["messages"][0]
+        except (KeyError, IndexError, TypeError):
+            return None
+        if message.get("type") != "text":
+            return None
+        return IncomingMessage(
+            phone=message.get("from", ""),
+            text=(message.get("text") or {}).get("body", ""),
+            name="Webhook Test",
+            provider_message_id=message.get("id"),
+            raw=payload,
+        )
+
+    def send_message(self, phone: str, text: str) -> dict[str, Any]:
+        if self.fail_send:
+            raise WhatsAppProviderError("send failed in test")
+        self.sent.append({"phone": phone, "text": text})
+        return {"ok": True}
+
+
+class FakeBrainForWebhook:
+    def handle_message(
+        self,
+        phone: str,
+        message: str,
+        name: str | None = None,
+        email: str | None = None,
+    ) -> Any:
+        return SimpleNamespace(
+            message="Respuesta controlada",
+            intent="discovery",
+            handoff=False,
+            lead={"id": "lead_webhook_test"},
+        )
+
+
+def meta_settings(secret: str = "app-secret-for-test") -> SimpleNamespace:
+    return SimpleNamespace(whatsapp_provider="meta", meta_app_secret=secret)
+
+
+def sample_meta_payload(with_messages: bool = True) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    if with_messages:
+        value["contacts"] = [{"profile": {"name": "Lead Meta"}}]
+        value["messages"] = [
+            {
+                "from": "17865550100",
+                "id": "wamid.test",
+                "type": "text",
+                "text": {"body": "Hola, quiero informacion"},
+            }
+        ]
+    return {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": value,
+                    }
+                ]
+            }
+        ],
+    }
 
 
 def test_w2_fallback_agent() -> None:
@@ -279,12 +361,74 @@ def test_w5_meta_signature_security() -> None:
     print("W5 Meta signature security simulation OK")
 
 
+def test_webhook_missing_signature_is_401() -> None:
+    body = json.dumps(sample_meta_payload()).encode("utf-8")
+    try:
+        asyncio.run(
+            process_webhook_body(
+                body,
+                None,
+                current_settings=meta_settings(),
+                provider=FakeMetaProviderForWebhook(),
+                brain=FakeBrainForWebhook(),
+            )
+        )
+    except WebhookHTTPError as exc:
+        assert exc.status_code == 401
+        assert "signature" in str(exc.detail).casefold()
+    else:
+        raise AssertionError("missing Meta signature should return HTTP 401")
+
+    print("Webhook missing signature returns 401 OK")
+
+
+def test_webhook_without_messages_is_ignored() -> None:
+    payload = sample_meta_payload(with_messages=False)
+    body = json.dumps(payload).encode("utf-8")
+    signature = sign_meta_payload(body, "app-secret-for-test")
+    result = asyncio.run(
+        process_webhook_body(
+            body,
+            signature,
+            current_settings=meta_settings(),
+            provider=FakeMetaProviderForWebhook(),
+            brain=FakeBrainForWebhook(),
+        )
+    )
+    assert result == {"ok": True, "ignored": True}
+
+    print("Webhook without messages ignored OK")
+
+
+def test_webhook_sample_message_never_crashes_on_send_failure() -> None:
+    payload = sample_meta_payload(with_messages=True)
+    body = json.dumps(payload).encode("utf-8")
+    signature = sign_meta_payload(body, "app-secret-for-test")
+    result = asyncio.run(
+        process_webhook_body(
+            body,
+            signature,
+            current_settings=meta_settings(),
+            provider=FakeMetaProviderForWebhook(fail_send=True),
+            brain=FakeBrainForWebhook(),
+        )
+    )
+    assert result["ok"] is True
+    assert result["accepted"] is False
+    assert result["error"] == "processing_failed"
+
+    print("Webhook sample message failure returns 200 body OK")
+
+
 def main() -> None:
     test_w2_fallback_agent()
     test_w3_claude_brain()
     test_w4_mock_provider()
     test_w4_meta_provider_parse()
     test_w5_meta_signature_security()
+    test_webhook_missing_signature_is_401()
+    test_webhook_without_messages_is_ignored()
+    test_webhook_sample_message_never_crashes_on_send_failure()
 
 
 if __name__ == "__main__":

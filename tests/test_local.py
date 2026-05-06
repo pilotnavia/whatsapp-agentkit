@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from agent.brain import ClaudeSalesBrain
 from agent.memory import ConversationMemory
+from agent.providers import MetaWhatsAppProvider, MockWhatsAppProvider
 from agent.seller_agent import ClubCommerceSellerAgent
 from agent.tools import CRMSalesTools
 
@@ -165,9 +166,109 @@ def test_w3_claude_brain() -> None:
     print(f"Brain handoff reply: {handoff.message}")
 
 
+def test_w4_mock_provider() -> None:
+    provider = MockWhatsAppProvider(verify_token="verify-me")
+    challenge = provider.verify_webhook(
+        {
+            "hub.mode": "subscribe",
+            "hub.verify_token": "verify-me",
+            "hub.challenge": "challenge-ok",
+        }
+    )
+    assert challenge == "challenge-ok"
+
+    incoming = provider.parse_webhook(
+        {
+            "phone": "+17865550100",
+            "message": "Hola desde mock",
+            "name": "Adrian Test",
+            "id": "mock_msg_1",
+        }
+    )
+    assert incoming is not None
+    assert incoming.phone == "+17865550100"
+    assert incoming.text == "Hola desde mock"
+
+    sent = provider.send_message("+17865550100", "Respuesta mock")
+    assert sent["ok"] is True
+    assert provider.sent_messages[-1]["text"] == "Respuesta mock"
+
+    print("W4 mock provider simulation OK")
+
+
+def test_w4_meta_provider_parse() -> None:
+    provider = MetaWhatsAppProvider(
+        access_token="token-not-used",
+        phone_number_id="123456",
+        verify_token="meta-verify",
+    )
+    challenge = provider.verify_webhook(
+        {
+            "hub.mode": "subscribe",
+            "hub.verify_token": "meta-verify",
+            "hub.challenge": "meta-challenge",
+        }
+    )
+    assert challenge == "meta-challenge"
+
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "contacts": [{"profile": {"name": "Lead Meta"}}],
+                            "messages": [
+                                {
+                                    "from": "17865550100",
+                                    "id": "wamid.test",
+                                    "type": "text",
+                                    "text": {"body": "Cuanto cuesta?"},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    incoming = provider.parse_webhook(payload)
+    assert incoming is not None
+    assert incoming.phone == "17865550100"
+    assert incoming.name == "Lead Meta"
+    assert incoming.text == "Cuanto cuesta?"
+
+    ignored = provider.parse_webhook(
+        {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "from": "17865550100",
+                                        "id": "wamid.image",
+                                        "type": "image",
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+    assert ignored is None
+
+    print("W4 Meta provider parse simulation OK")
+
+
 def main() -> None:
     test_w2_fallback_agent()
     test_w3_claude_brain()
+    test_w4_mock_provider()
+    test_w4_meta_provider_parse()
 
 
 if __name__ == "__main__":

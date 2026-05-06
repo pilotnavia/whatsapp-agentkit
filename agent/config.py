@@ -22,10 +22,20 @@ class Settings:
     agent_name: str
     business_name: str
     memory_path: str
+    meta_access_token: str
+    meta_phone_number_id: str
+    meta_verify_token: str
+    meta_graph_version: str
 
     @property
     def crm_ready(self) -> bool:
         return bool(self.crm_api_url and self.crm_api_key)
+
+    @property
+    def whatsapp_ready(self) -> bool:
+        if self.whatsapp_provider == "meta":
+            return bool(self.meta_access_token and self.meta_phone_number_id and self.meta_verify_token)
+        return True
 
 
 def load_settings() -> Settings:
@@ -46,4 +56,8 @@ def load_settings() -> Settings:
         agent_name=_env("AGENT_NAME", "Club Commerce AI"),
         business_name=_env("BUSINESS_NAME", "Club Commerce"),
         memory_path=_env("MEMORY_PATH", "./agent_memory.json"),
+        meta_access_token=_env("META_ACCESS_TOKEN"),
+        meta_phone_number_id=_env("META_PHONE_NUMBER_ID"),
+        meta_verify_token=_env("META_VERIFY_TOKEN", "agentkit-verify"),
+        meta_graph_version=_env("META_GRAPH_VERSION", "v20.0"),
     )

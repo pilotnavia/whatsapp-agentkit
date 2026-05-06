@@ -42,6 +42,7 @@ tests/
 
 ```bash
 python3 -m py_compile agent/*.py
+python3 -m py_compile agent/providers/*.py
 python3 tests/test_local.py
 ```
 
@@ -49,6 +50,12 @@ python3 tests/test_local.py
 
 ```bash
 uvicorn agent.main:app --reload --port 8000
+```
+
+Smoke test local:
+
+```bash
+python3 scripts/smoke_test.py --local
 ```
 
 Probar conversacion:
@@ -69,6 +76,42 @@ curl "http://127.0.0.1:8000/webhook?hub.mode=subscribe&hub.verify_token=agentkit
 curl -X POST http://127.0.0.1:8000/webhook \
   -H "Content-Type: application/json" \
   -d '{"phone":"+17865550100","name":"Adrian Test","message":"Quiero info"}'
+```
+
+## Docker local
+
+```bash
+docker build -t club-commerce-whatsapp-agent .
+docker run --rm -p 8000:8000 \
+  -e WHATSAPP_PROVIDER=mock \
+  -e CRM_API_URL=http://host.docker.internal:4173 \
+  -e CRM_API_KEY=tu_api_key_del_crm_bridge \
+  club-commerce-whatsapp-agent
+```
+
+## Deploy env vars
+
+Para Render/Railway usa las variables de `.env.example`. Minimo para produccion:
+
+```bash
+ENVIRONMENT=production
+PORT=8000
+CRM_API_URL=https://TU-CRM.com
+CRM_API_KEY=secret_del_crm_bridge
+ANTHROPIC_API_KEY=sk-ant...
+WHATSAPP_PROVIDER=meta
+META_ACCESS_TOKEN=token_meta
+META_PHONE_NUMBER_ID=id_numero
+META_VERIFY_TOKEN=verify_privado
+META_APP_SECRET=app_secret
+META_GRAPH_VERSION=v20.0
+MEMORY_PATH=/app/data/agent_memory.json
+```
+
+Checklist completo:
+
+```text
+DEPLOY_CHECKLIST.md
 ```
 
 ## W3/W4 pendientes

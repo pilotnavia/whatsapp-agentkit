@@ -1,6 +1,8 @@
 .env
 agent_memory.json
 *.memory.json
+logs/
+*.log
 __pycache__/
 *.py[cod]
 *.db

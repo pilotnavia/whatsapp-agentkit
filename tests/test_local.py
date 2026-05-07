@@ -156,6 +156,10 @@ class FakeMetaProviderForWebhook:
 
 
 class FakeBrainForWebhook:
+    def __init__(self, tools: CRMSalesTools | None = None) -> None:
+        self.tools = tools
+        self.calls = 0
+
     def handle_message(
         self,
         phone: str,
@@ -163,6 +167,7 @@ class FakeBrainForWebhook:
         name: str | None = None,
         email: str | None = None,
     ) -> Any:
+        self.calls += 1
         return SimpleNamespace(
             message="Respuesta controlada",
             intent="discovery",
@@ -420,6 +425,37 @@ def test_webhook_sample_message_never_crashes_on_send_failure() -> None:
     print("Webhook sample message failure returns 200 body OK")
 
 
+def test_webhook_human_takeover_pauses_auto_reply() -> None:
+    fake = FakeCRMClient()
+    fake.lead["whatsapp"] = {
+        "mode": "human",
+        "humanOwnerId": "user_admin_adrian",
+        "humanOwnerName": "Adrian",
+    }
+    provider = FakeMetaProviderForWebhook()
+    brain = FakeBrainForWebhook(CRMSalesTools(fake))
+    payload = sample_meta_payload(with_messages=True)
+    body = json.dumps(payload).encode("utf-8")
+    signature = sign_meta_payload(body, "app-secret-for-test")
+    result = asyncio.run(
+        process_webhook_body(
+            body,
+            signature,
+            current_settings=meta_settings(),
+            provider=provider,
+            brain=brain,
+        )
+    )
+    assert result["ok"] is True
+    assert result["paused"] is True
+    assert result["mode"] == "human"
+    assert brain.calls == 0
+    assert provider.sent == []
+    assert any(item["type"] == "whatsapp_inbound_paused" for item in fake.activities)
+
+    print("Webhook human takeover pause OK")
+
+
 def main() -> None:
     test_w2_fallback_agent()
     test_w3_claude_brain()
@@ -429,6 +465,7 @@ def main() -> None:
     test_webhook_missing_signature_is_401()
     test_webhook_without_messages_is_ignored()
     test_webhook_sample_message_never_crashes_on_send_failure()
+    test_webhook_human_takeover_pauses_auto_reply()
 
 
 if __name__ == "__main__":

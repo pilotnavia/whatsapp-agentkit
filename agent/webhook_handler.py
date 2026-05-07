@@ -52,6 +52,49 @@ def has_meta_messages(payload: dict[str, Any]) -> bool:
     return False
 
 
+def whatsapp_mode_from_lead(lead: dict[str, Any] | None) -> str:
+    if not isinstance(lead, dict):
+        return "bot"
+    whatsapp = lead.get("whatsapp")
+    if not isinstance(whatsapp, dict):
+        meta = lead.get("meta")
+        whatsapp = meta.get("whatsapp") if isinstance(meta, dict) else {}
+    mode = str((whatsapp or {}).get("mode") or "bot").strip().lower()
+    return mode if mode in {"bot", "human", "handoff"} else "bot"
+
+
+def should_pause_for_human_takeover(brain: Any, inbound: Any) -> dict[str, Any]:
+    tools = getattr(brain, "tools", None)
+    if not tools or not hasattr(tools, "lookup_lead"):
+        return {"pause": False}
+    lookup = tools.lookup_lead(phone=getattr(inbound, "phone", None), email=getattr(inbound, "email", None))
+    lead = lookup.get("lead") if isinstance(lookup, dict) else None
+    mode = whatsapp_mode_from_lead(lead)
+    if mode not in {"human", "handoff"}:
+        return {"pause": False, "mode": mode, "lead": lead}
+
+    lead_id = lead.get("id") if isinstance(lead, dict) else None
+    try:
+        if hasattr(tools, "log_activity"):
+            tools.log_activity(
+                "WhatsApp inbound recibido sin respuesta automatica por takeover humano",
+                lead_id=lead_id,
+                activity_type="whatsapp_inbound_paused",
+                meta={
+                    "mode": mode,
+                    "channel": "whatsapp",
+                    "messagePreview": str(getattr(inbound, "text", "") or "")[:180],
+                },
+            )
+    except Exception as exc:
+        logger.warning(
+            "POST /webhook pause activity failed phone=%s error=%s",
+            mask_phone(getattr(inbound, "phone", None)),
+            type(exc).__name__,
+        )
+    return {"pause": True, "mode": mode, "lead": lead}
+
+
 async def process_webhook_body(
     body: bytes,
     signature_header: str | None,
@@ -115,6 +158,20 @@ async def process_webhook_body(
         return {"ok": True, "ignored": True}
 
     try:
+        pause = should_pause_for_human_takeover(brain, inbound)
+        if pause.get("pause"):
+            logger.info(
+                "POST /webhook auto reply paused mode=%s phone=%s",
+                pause.get("mode"),
+                mask_phone(getattr(inbound, "phone", None)),
+            )
+            return {
+                "ok": True,
+                "ignored": True,
+                "paused": True,
+                "mode": pause.get("mode"),
+                "leadId": ((pause.get("lead") or {}) if isinstance(pause.get("lead"), dict) else {}).get("id"),
+            }
         reply = brain.handle_message(
             phone=inbound.phone,
             message=inbound.text,

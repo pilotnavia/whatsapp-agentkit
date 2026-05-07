@@ -55,7 +55,7 @@ class ClaudeSalesBrain:
             return reply
 
         inferred_intent = _detect_intent(message)
-        stage = "interesado" if inferred_intent in {"pricing", "interested", "ready_for_handoff"} else "conversacion"
+        stage = "interesado" if inferred_intent in {"pricing", "interested", "ready_for_handoff", "budget_capture"} else "conversacion"
         upsert = self.tools.upsert_lead(
             phone=phone,
             email=email,
@@ -91,6 +91,18 @@ class ClaudeSalesBrain:
             "price_objection",
             "time_objection",
             "trust_objection",
+            "experience_question",
+            "ecommerce_general",
+            "shopify_question",
+            "meta_ads_question",
+            "meta_ads_lost_money",
+            "dropshipping_question",
+            "china_import_question",
+            "product_validation",
+            "brand_question",
+            "funnels_question",
+            "budget_capture",
+            "info_request",
             "ready_for_handoff",
             "needs_human",
         }:
@@ -168,7 +180,7 @@ class ClaudeSalesBrain:
             "Debes responder SOLO JSON valido, sin markdown, con esta forma:\n"
             "{\n"
             '  "reply": "mensaje final para WhatsApp",\n'
-            '  "intent": "discovery|pricing|interested|price_objection|time_objection|trust_objection|experience_question|ready_for_handoff|needs_human",\n'
+            '  "intent": "discovery|pricing|interested|price_objection|time_objection|trust_objection|experience_question|ecommerce_general|shopify_question|meta_ads_question|meta_ads_lost_money|dropshipping_question|china_import_question|product_validation|brand_question|funnels_question|budget_capture|info_request|ready_for_handoff|needs_human",\n'
             '  "handoff": false,\n'
             '  "needsFollowUp": true,\n'
             '  "followUpNote": "nota interna breve",\n'
@@ -176,6 +188,8 @@ class ClaudeSalesBrain:
             '  "stage": "conversacion|interesado"\n'
             "}\n\n"
             "Si el lead pide comprar, pagar, link, asesor, humano, o esta molesto: handoff=true.\n"
+            "Si responde presupuesto, tienda, producto, ads o urgencia, incorporalo en tu diagnostico.\n"
+            "Recomienda Academy/Pro/Elite solo si encaja con el caso y existe en el catalogo.\n"
             "No inventes precios. Usa solo este catalogo si hablas de precios:\n"
             f"{catalog}"
         )
@@ -231,7 +245,28 @@ class ClaudeSalesBrain:
     @staticmethod
     def _should_load_products(message: str) -> bool:
         text = message.casefold()
-        return any(word in text for word in ("precio", "cuanto", "cuánto", "plan", "planes", "cost", "vale", "pagar"))
+        return any(
+            word in text
+            for word in (
+                "precio",
+                "cuanto",
+                "cuánto",
+                "plan",
+                "planes",
+                "programa",
+                "academy",
+                "pro",
+                "elite",
+                "pagar",
+                "comprar",
+                "shopify",
+                "ads",
+                "dropshipping",
+                "china",
+                "producto",
+                "ecommerce",
+            )
+        )
 
     def _remember(self, phone: str, user_message: str, assistant_message: str, meta: dict[str, Any]) -> None:
         self.memory.append(phone, "user", user_message, meta=meta)

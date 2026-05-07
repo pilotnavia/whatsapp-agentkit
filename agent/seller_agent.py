@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .sales_prompt import OBJECTION_GUIDE, SYSTEM_PROMPT
+from .sales_prompt import ECOMMERCE_PLAYBOOK, OBJECTION_GUIDE, SYSTEM_PROMPT
 from .tools import CRMSalesTools
 
 
@@ -35,6 +35,15 @@ STRONG_INTENT = (
 PRICE_INTENT = ("precio", "cuanto", "cuánto", "cost", "vale", "plan", "planes")
 ANGER_INTENT = ("molesto", "estafa", "enojo", "enojado", "reclamo", "queja")
 HOT_STAGE_WORDS = ("interesa", "interesado", "me sirve", "quiero", "listo")
+ECOMMERCE_GENERAL_INTENT = ("ecommerce", "e-commerce", "vender online", "negocio online", "ventas online")
+SHOPIFY_INTENT = ("shopify", "tienda", "checkout", "pagina", "página")
+META_ADS_INTENT = ("meta ads", "facebook ads", "anuncios", "ads", "pixel", "campaña", "campana")
+DROPSHIPPING_INTENT = ("dropshipping", "drop shipping")
+CHINA_IMPORT_INTENT = ("china", "alibaba", "importar", "proveedor", "proveedores", "muestras", "moq")
+PRODUCT_INTENT = ("producto ganador", "validar producto", "no tengo producto", "que vender", "qué vender", "nicho")
+BRAND_INTENT = ("marca", "branding", "brand")
+FUNNEL_INTENT = ("embudo", "funnel", "landing", "conversion", "conversión")
+INFO_INTENT = ("mandame info", "mándame info", "informacion", "información", "info")
 
 
 @dataclass
@@ -81,12 +90,34 @@ def _detect_intent(message: str) -> str:
         return "ready_for_handoff"
     if any(word in text for word in PRICE_INTENT):
         return "pricing"
+    if any(word in text for word in META_ADS_INTENT) and any(word in text for word in ("perdi", "perdí", "perder", "queme", "quemé")):
+        return "meta_ads_lost_money"
+    if re.search(r"(presupuesto|budget).{0,30}(\$?\s?\d[\d,.]{1,10})", text):
+        return "budget_capture"
     if "caro" in text or "dinero" in text or "presupuesto" in text:
         return "price_objection"
     if "tiempo" in text or "ocupado" in text:
         return "time_objection"
     if "confio" in text or "confío" in text or "seguro" in text:
         return "trust_objection"
+    if any(word in text for word in SHOPIFY_INTENT):
+        return "shopify_question"
+    if any(word in text for word in META_ADS_INTENT):
+        return "meta_ads_question"
+    if any(word in text for word in DROPSHIPPING_INTENT):
+        return "dropshipping_question"
+    if any(word in text for word in CHINA_IMPORT_INTENT):
+        return "china_import_question"
+    if any(word in text for word in PRODUCT_INTENT):
+        return "product_validation"
+    if any(word in text for word in BRAND_INTENT):
+        return "brand_question"
+    if any(word in text for word in FUNNEL_INTENT):
+        return "funnels_question"
+    if any(word in text for word in INFO_INTENT):
+        return "info_request"
+    if any(word in text for word in ECOMMERCE_GENERAL_INTENT):
+        return "ecommerce_general"
     if "nuevo" in text or "empezando" in text or "experiencia" in text:
         return "experience_question"
     if any(word in text for word in HOT_STAGE_WORDS):
@@ -107,7 +138,7 @@ class ClubCommerceSellerAgent:
         email: str | None = None,
     ) -> AgentReply:
         intent = _detect_intent(message)
-        stage = "interesado" if intent in {"pricing", "interested", "ready_for_handoff"} else "conversacion"
+        stage = "interesado" if intent in {"pricing", "interested", "ready_for_handoff", "budget_capture"} else "conversacion"
 
         upsert = self.tools.upsert_lead(
             phone=phone,
@@ -179,6 +210,27 @@ class ClubCommerceSellerAgent:
             self._safe_followup(lead_id, "Seguimiento de lead nuevo o sin experiencia", 1440)
             return AgentReply(OBJECTION_GUIDE["experiencia"], lead, intent, tool_results=tool_results)
 
+        if intent == "budget_capture":
+            self._safe_followup(lead_id, "Revisar presupuesto declarado por WhatsApp", 720)
+            return AgentReply(
+                "Perfecto, con ese presupuesto conviene priorizar producto, tienda y validacion antes de escalar ads. "
+                "Ya tienes producto definido o necesitas ayuda encontrando uno?",
+                lead,
+                intent,
+                tool_results=tool_results,
+            )
+
+        ecommerce_reply = self._ecommerce_reply(intent)
+        if ecommerce_reply:
+            self.tools.log_activity(
+                f"Insight WhatsApp AI: {intent}",
+                lead_id=lead_id,
+                activity_type="agent_insight",
+                meta={"intent": intent, "channel": "whatsapp", "messagePreview": message[:180]},
+            )
+            self._safe_followup(lead_id, f"Dar seguimiento a consulta {intent}", 1440)
+            return AgentReply(ecommerce_reply, lead, intent, tool_results=tool_results)
+
         if not name and not self._lead_has_name(lead):
             self._safe_followup(lead_id, "Pedir nombre y contexto del prospecto", 1440)
             return AgentReply(
@@ -208,3 +260,18 @@ class ClubCommerceSellerAgent:
         name = str(lead.get("name") or "").strip()
         return bool(name and not re.fullmatch(r"lead\s*\d+", name, flags=re.I))
 
+    @staticmethod
+    def _ecommerce_reply(intent: str) -> str:
+        mapping = {
+            "shopify_question": ECOMMERCE_PLAYBOOK["shopify"],
+            "meta_ads_question": ECOMMERCE_PLAYBOOK["meta_ads"],
+            "meta_ads_lost_money": OBJECTION_GUIDE["ads"],
+            "dropshipping_question": ECOMMERCE_PLAYBOOK["dropshipping"],
+            "china_import_question": ECOMMERCE_PLAYBOOK["china_import"],
+            "product_validation": ECOMMERCE_PLAYBOOK["product_validation"],
+            "brand_question": ECOMMERCE_PLAYBOOK["brand"],
+            "funnels_question": ECOMMERCE_PLAYBOOK["funnels"],
+            "info_request": OBJECTION_GUIDE["info"],
+            "ecommerce_general": ECOMMERCE_PLAYBOOK["ecommerce_general"],
+        }
+        return mapping.get(intent, "")

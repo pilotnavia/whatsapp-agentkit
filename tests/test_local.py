@@ -99,6 +99,14 @@ class FakeAnthropic:
 
     def complete(self, system: str, messages: list[dict[str, str]], max_tokens: int = 900) -> str:
         last = messages[-1]["content"].casefold()
+        if "shopify" in last:
+            assert "Conocimiento base permitido" in system
+            assert "Shopify" in system
+            return (
+                '{"reply":"Shopify ayuda, pero primero hay que validar oferta, producto y pagina. Ya tienes tienda creada?",'
+                '"intent":"shopify_question","handoff":false,"needsFollowUp":true,'
+                '"followUpNote":"Diagnosticar tienda Shopify","followUpMinutes":1440,"stage":"conversacion"}'
+            )
         if "comprar" in last or "link" in last:
             return (
                 '{"reply":"Perfecto, te conecto con un closer del equipo para avanzar con el pago.",'
@@ -226,6 +234,56 @@ def test_w2_fallback_agent() -> None:
     print(f"Handoff reply: {handoff.message}")
 
 
+def test_w12_ecommerce_playbook_fallback() -> None:
+    scenarios = [
+        ("Que necesito para empezar en ecommerce?", "ecommerce_general", "validar"),
+        ("No se Shopify y no tengo ventas", "shopify_question", "Shopify"),
+        ("Probe Meta Ads y perdi dinero", "meta_ads_lost_money", "presupuesto"),
+        ("Quiero hacer dropshipping desde cero", "dropshipping_question", "Dropshipping"),
+        ("Quiero importar desde China con proveedores", "china_import_question", "China"),
+        ("No tengo producto ganador todavia", "product_validation", "producto"),
+        ("Tengo presupuesto de $1000 para iniciar", "budget_capture", "presupuesto"),
+        ("Mandame info del programa", "info_request", "closer"),
+        ("Quiero hablar con alguien humano", "ready_for_handoff", "equipo"),
+    ]
+
+    for message, expected_intent, expected_text in scenarios:
+        fake = FakeCRMClient()
+        reply = ClubCommerceSellerAgent(CRMSalesTools(fake)).handle_message(
+            "+1 (786) 555-0100",
+            message,
+            "Lead Ecommerce",
+        )
+        assert reply.intent == expected_intent, message
+        assert expected_text.casefold() in reply.message.casefold(), message
+        assert fake.lead.get("intake", {}).get("answers"), message
+        assert fake.activities, message
+
+    budget_fake = FakeCRMClient()
+    ClubCommerceSellerAgent(CRMSalesTools(budget_fake)).handle_message(
+        "+1 (786) 555-0100",
+        "Tengo presupuesto de $1000 para iniciar",
+        "Lead Budget",
+    )
+    answers = budget_fake.lead.get("intake", {}).get("answers", [])
+    assert any(item.get("key") == "budget" and "1000" in item.get("value", "") for item in answers)
+    assert any(item.get("key") == "recommended_product" for item in answers)
+
+    ads_fake = FakeCRMClient()
+    ClubCommerceSellerAgent(CRMSalesTools(ads_fake)).handle_message(
+        "+1 (786) 555-0100",
+        "Probe Meta Ads y perdi dinero con presupuesto de $500",
+        "Lead Ads",
+    )
+    assert any(item["type"] == "agent_insight" for item in ads_fake.activities)
+    assert any(
+        item.get("key") == "main_objection" and "ads" in item.get("value", "").casefold()
+        for item in ads_fake.lead.get("intake", {}).get("answers", [])
+    )
+
+    print("W12 ecommerce playbook fallback OK")
+
+
 def test_w3_claude_brain() -> None:
     fake = FakeCRMClient()
     tools = CRMSalesTools(fake)
@@ -246,6 +304,10 @@ def test_w3_claude_brain() -> None:
 
         objection = brain.handle_message("+1 (786) 555-0100", "Se me hace caro", "Adrian Test")
         assert objection.intent == "price_objection"
+
+        shopify = brain.handle_message("+1 (786) 555-0100", "No se Shopify", "Adrian Test")
+        assert shopify.intent == "shopify_question"
+        assert "tienda" in shopify.message.casefold()
 
         handoff = brain.handle_message("+1 (786) 555-0100", "Quiero comprar, pasame el link", "Adrian Test")
         assert handoff.handoff is True
@@ -460,6 +522,7 @@ def test_webhook_human_takeover_pauses_auto_reply() -> None:
 
 def main() -> None:
     test_w2_fallback_agent()
+    test_w12_ecommerce_playbook_fallback()
     test_w3_claude_brain()
     test_w4_mock_provider()
     test_w4_meta_provider_parse()

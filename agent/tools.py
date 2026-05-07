@@ -62,17 +62,40 @@ class CRMSalesTools:
         intent: str | None = None,
         stage: str | None = None,
     ) -> dict[str, Any]:
+        clean_phone = normalize_phone(phone)
+        intake_answer = {
+            "label": "Mensaje inicial WhatsApp",
+            "value": message,
+            "key": "whatsapp_initial_message",
+        }
+        if intent:
+            intake_answer_intent = {
+                "label": "Intencion detectada",
+                "value": intent,
+                "key": "agent_detected_intent",
+            }
+        else:
+            intake_answer_intent = None
         payload = {
-            "phone": normalize_phone(phone),
+            "phone": clean_phone,
             "email": email,
             "name": name,
             "source": "WhatsApp",
             "campaign": "WhatsApp AI Agent",
             "stage": stage,
             "notes": f"WhatsApp AI: {message}".strip(),
+            "intake": {
+                "summary": f"WhatsApp: {message}".strip()[:1000],
+                "answers": [item for item in (intake_answer, intake_answer_intent) if item],
+                "sourcePayload": {
+                    "platform": "whatsapp",
+                    "phone": clean_phone,
+                },
+            },
             "meta": {
                 "intent": intent,
                 "lastInboundMessage": message,
+                "whatsappPhone": clean_phone,
                 "channel": "whatsapp",
             },
         }
@@ -122,4 +145,3 @@ class CRMSalesTools:
         response = self.crm.get_products()
         products = response.get("products", response if isinstance(response, list) else [])
         return products if isinstance(products, list) else []
-

@@ -85,6 +85,25 @@ class ClaudeSalesBrain:
             activity_type="whatsapp_ai_reply",
             meta={"intent": decision.intent, "handoff": decision.handoff},
         )
+        if decision.intent in {
+            "pricing",
+            "interested",
+            "price_objection",
+            "time_objection",
+            "trust_objection",
+            "ready_for_handoff",
+            "needs_human",
+        }:
+            self.tools.log_activity(
+                f"Insight WhatsApp AI: {decision.intent}",
+                lead_id=lead_id,
+                activity_type="agent_insight",
+                meta={
+                    "intent": decision.intent,
+                    "channel": "whatsapp",
+                    "messagePreview": message[:180],
+                },
+            )
 
         if decision.handoff:
             handoff = self.tools.request_human_handoff(
@@ -217,4 +236,3 @@ class ClaudeSalesBrain:
     def _remember(self, phone: str, user_message: str, assistant_message: str, meta: dict[str, Any]) -> None:
         self.memory.append(phone, "user", user_message, meta=meta)
         self.memory.append(phone, "assistant", assistant_message, meta=meta)
-

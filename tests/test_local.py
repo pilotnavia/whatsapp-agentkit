@@ -236,6 +236,8 @@ def test_w3_claude_brain() -> None:
         first = brain.handle_message("+1 (786) 555-0100", "Hola, quiero info", "Adrian Test")
         assert first.intent == "discovery"
         assert "tienda" in first.message
+        assert fake.lead.get("intake", {}).get("answers"), "WhatsApp context should sync into CRM intake"
+        assert fake.lead.get("meta", {}).get("whatsappPhone") == "17865550100"
 
         pricing = brain.handle_message("+1 (786) 555-0100", "Que precio tienen?", "Adrian Test")
         assert pricing.intent == "pricing"

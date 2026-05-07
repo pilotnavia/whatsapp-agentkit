@@ -27,6 +27,7 @@ class Settings:
     meta_verify_token: str
     meta_app_secret: str
     meta_graph_version: str
+    agent_api_key: str
 
     @property
     def crm_ready(self) -> bool:
@@ -67,4 +68,5 @@ def load_settings() -> Settings:
         meta_verify_token=_env("META_VERIFY_TOKEN", "agentkit-verify"),
         meta_app_secret=_env("META_APP_SECRET"),
         meta_graph_version=_env("META_GRAPH_VERSION", "v20.0"),
+        agent_api_key=_env("AGENT_API_KEY"),
     )

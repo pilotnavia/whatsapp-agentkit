@@ -7,9 +7,10 @@ service once provider credentials are configured in W3/W4.
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import PlainTextResponse
 
@@ -19,6 +20,8 @@ from .config import load_settings
 from .crm_client import CRMClient, CRMClientError
 from .memory import ConversationMemory
 from .providers import build_provider
+from .providers.base import WhatsAppProviderError
+from .security import mask_phone
 from .tools import CRMSalesTools
 from .webhook_handler import WebhookHTTPError, process_webhook_body
 
@@ -41,6 +44,19 @@ class SimulateMessage(BaseModel):
     message: str = Field(..., min_length=1)
     name: str | None = None
     email: str | None = None
+
+
+class SendMessagePayload(BaseModel):
+    phone: str = Field(..., min_length=5)
+    message: str = Field(..., min_length=1, max_length=1500)
+    leadId: str | None = None
+
+
+def require_agent_api_key(api_key: str | None) -> None:
+    expected = settings.agent_api_key
+    provided = api_key or ""
+    if not expected or not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Invalid agent API key")
 
 
 @app.get("/")
@@ -108,6 +124,32 @@ def simulate(payload: SimulateMessage) -> dict[str, Any]:
 def webhook_mock(payload: SimulateMessage) -> dict[str, Any]:
     """Provider-neutral mock webhook for local tests."""
     return simulate(payload)
+
+
+@app.post("/api/send-message")
+def send_message(payload: SendMessagePayload, x_agent_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    require_agent_api_key(x_agent_api_key)
+    if settings.whatsapp_provider != "meta" or getattr(whatsapp_provider, "name", "") != "meta":
+        raise HTTPException(status_code=409, detail="WhatsApp real send requires WHATSAPP_PROVIDER=meta")
+
+    logger.info(
+        "POST /api/send-message provider=%s phone=%s lead=%s",
+        getattr(whatsapp_provider, "name", "unknown"),
+        mask_phone(payload.phone),
+        payload.leadId or "",
+    )
+    try:
+        result = whatsapp_provider.send_message(payload.phone, payload.message.strip())
+    except WhatsAppProviderError as exc:
+        logger.warning("Manual WhatsApp send failed phone=%s error=%s", mask_phone(payload.phone), type(exc).__name__)
+        raise HTTPException(status_code=502, detail="WhatsApp provider send failed") from exc
+
+    response = result.get("response") if isinstance(result, dict) else {}
+    messages = response.get("messages") if isinstance(response, dict) else []
+    provider_message_id = ""
+    if isinstance(messages, list) and messages and isinstance(messages[0], dict):
+        provider_message_id = str(messages[0].get("id") or "")
+    return {"ok": True, "providerMessageId": provider_message_id}
 
 
 @app.get("/webhook")

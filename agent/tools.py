@@ -258,6 +258,10 @@ class CRMSalesTools:
         reason: str,
         note: str,
         email: str | None = None,
+        handoff_trigger: str = "",
+        handoff_summary: str = "",
+        recommended_next_step: str = "",
+        confidence: str = "medium",
     ) -> dict[str, Any]:
         clean_phone = normalize_phone(phone)
         try:
@@ -267,6 +271,10 @@ class CRMSalesTools:
                 email=email,
                 reason=reason,
                 note=note,
+                handoff_trigger=handoff_trigger,
+                handoff_summary=handoff_summary,
+                recommended_next_step=recommended_next_step,
+                confidence=confidence,
             )
         except Exception as exc:
             logger.warning("CRM handoff failed lead=%s phone=%s error=%s", lead_id, mask_phone(clean_phone), type(exc).__name__)

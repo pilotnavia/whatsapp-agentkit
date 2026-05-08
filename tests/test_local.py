@@ -79,8 +79,21 @@ class FakeCRMClient:
         email: str | None = None,
         reason: str = "",
         note: str = "",
+        handoff_trigger: str = "",
+        handoff_summary: str = "",
+        recommended_next_step: str = "",
+        confidence: str = "medium",
     ) -> dict[str, Any]:
-        item = {"leadId": lead_id, "phone": phone, "reason": reason, "note": note}
+        item = {
+            "leadId": lead_id,
+            "phone": phone,
+            "reason": reason,
+            "note": note,
+            "handoffTrigger": handoff_trigger,
+            "handoffSummary": handoff_summary,
+            "recommendedNextStep": recommended_next_step,
+            "confidence": confidence,
+        }
         self.handoffs.append(item)
         return {"ok": True, "handoff": item}
 
@@ -112,7 +125,10 @@ class FakeAnthropic:
             return (
                 '{"reply":"Perfecto, te conecto con un closer del equipo para avanzar con el pago.",'
                 '"intent":"ready_for_handoff","handoff":true,"needsFollowUp":false,'
-                '"followUpNote":"Handoff por intencion fuerte","followUpMinutes":15,"stage":"interesado"}'
+                '"followUpNote":"Handoff por intencion fuerte","followUpMinutes":15,"stage":"interesado",'
+                '"handoffReason":"Lead pidio link de pago","handoffTrigger":"payment",'
+                '"handoffSummary":"Quiere comprar y pidio el link.","recommendedNextStep":"Enviar opciones de pago y cerrar.",'
+                '"confidence":"high"}'
             )
         if "precio" in last or "cuanto" in last:
             assert "100X Academy" in system
@@ -231,6 +247,8 @@ def test_w2_fallback_agent() -> None:
     handoff = agent.handle_message("+1 (786) 555-0100", "Quiero comprar, pasame el link", "Adrian Test")
     assert handoff.handoff is True
     assert fake.handoffs, "strong intent should request human handoff"
+    assert fake.handoffs[-1]["handoffTrigger"] == "high_intent"
+    assert fake.handoffs[-1]["recommendedNextStep"]
     assert fake.activities, "agent should log CRM activity"
 
     print("W2 local simulation OK")
@@ -316,6 +334,8 @@ def test_w3_claude_brain() -> None:
         handoff = brain.handle_message("+1 (786) 555-0100", "Quiero comprar, pasame el link", "Adrian Test")
         assert handoff.handoff is True
         assert fake.handoffs, "strong intent should request human handoff"
+        assert fake.handoffs[-1]["handoffTrigger"] == "payment"
+        assert fake.handoffs[-1]["confidence"] == "high"
         assert len(memory.load("+1 (786) 555-0100")) >= 6
 
     print("W3 Claude brain simulation OK")

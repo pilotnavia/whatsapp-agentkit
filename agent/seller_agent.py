@@ -160,12 +160,22 @@ class ClubCommerceSellerAgent:
 
         if intent in {"ready_for_handoff", "needs_human"}:
             reason = "Lead listo para humano" if intent == "ready_for_handoff" else "Lead requiere atencion humana"
+            trigger = "human_request" if intent == "needs_human" else "high_intent"
+            summary = (
+                "El lead pidio atencion humana."
+                if intent == "needs_human"
+                else "El lead mostro intencion fuerte de compra o avanzar al pago."
+            )
             handoff = self.tools.request_human_handoff(
                 lead_id=lead_id,
                 phone=phone,
                 email=email,
                 reason=reason,
                 note=message,
+                handoff_trigger=trigger,
+                handoff_summary=summary,
+                recommended_next_step="Tomar la conversacion, confirmar necesidad y guiar al siguiente paso.",
+                confidence="high" if intent == "ready_for_handoff" else "medium",
             )
             tool_results["handoff"] = handoff
             return AgentReply(

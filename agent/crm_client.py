@@ -114,6 +114,10 @@ class CRMClient:
         email: str | None = None,
         reason: str = "Intento fuerte detectado por WhatsApp AI Agent",
         note: str = "",
+        handoff_trigger: str = "",
+        handoff_summary: str = "",
+        recommended_next_step: str = "",
+        confidence: str = "medium",
     ) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -124,9 +128,12 @@ class CRMClient:
                 "email": email,
                 "reason": reason,
                 "note": note,
+                "handoffTrigger": handoff_trigger,
+                "handoffSummary": handoff_summary,
+                "recommendedNextStep": recommended_next_step,
+                "confidence": confidence,
             },
         )
 
     def get_products(self) -> dict[str, Any]:
         return self._request("GET", "/api/agent/products")
-

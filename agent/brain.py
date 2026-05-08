@@ -28,6 +28,11 @@ class BrainDecision:
     followup_note: str = "Seguimiento WhatsApp AI"
     followup_minutes: int = 1440
     stage: str = "conversacion"
+    handoff_reason: str = ""
+    handoff_trigger: str = ""
+    handoff_summary: str = ""
+    recommended_next_step: str = ""
+    confidence: str = "medium"
 
 
 class ClaudeSalesBrain:
@@ -122,8 +127,12 @@ class ClaudeSalesBrain:
                 lead_id=lead_id,
                 phone=phone,
                 email=email,
-                reason=f"Claude WhatsApp AI: {decision.intent}",
+                reason=decision.handoff_reason or f"Claude WhatsApp AI: {decision.intent}",
                 note=message,
+                handoff_trigger=decision.handoff_trigger or decision.intent,
+                handoff_summary=decision.handoff_summary or f"El lead requiere humano por {decision.intent}.",
+                recommended_next_step=decision.recommended_next_step or "Tomar la conversacion y responder con diagnostico/cierre.",
+                confidence=decision.confidence,
             )
             tool_results["handoff"] = handoff
         elif decision.needs_followup and lead_id:
@@ -166,6 +175,11 @@ class ClaudeSalesBrain:
                 needs_followup=not fallback.handoff,
                 followup_note="Fallback: seguimiento WhatsApp AI",
                 stage="interesado" if fallback.intent in {"pricing", "interested"} else "conversacion",
+                handoff_reason=f"Fallback WhatsApp AI: {fallback.intent}",
+                handoff_trigger=fallback.intent,
+                handoff_summary=f"El lead activo una entrega a humano por {fallback.intent}.",
+                recommended_next_step="Tomar la conversacion, confirmar necesidad y guiar al siguiente paso.",
+                confidence="medium",
             )
 
     def _system_prompt(self, products: list[dict[str, Any]]) -> str:
@@ -185,7 +199,12 @@ class ClaudeSalesBrain:
             '  "needsFollowUp": true,\n'
             '  "followUpNote": "nota interna breve",\n'
             '  "followUpMinutes": 1440,\n'
-            '  "stage": "conversacion|interesado"\n'
+            '  "stage": "conversacion|interesado",\n'
+            '  "handoffReason": "razon concreta para el closer si handoff=true",\n'
+            '  "handoffTrigger": "buy_intent|human_request|payment|angry|strong_objection|high_intent|other",\n'
+            '  "handoffSummary": "resumen corto del contexto para el closer",\n'
+            '  "recommendedNextStep": "proximo paso sugerido para el closer",\n'
+            '  "confidence": "low|medium|high"\n'
             "}\n\n"
             "Si el lead pide comprar, pagar, link, asesor, humano, o esta molesto: handoff=true.\n"
             "Si responde presupuesto, tienda, producto, ads o urgencia, incorporalo en tu diagnostico.\n"
@@ -232,6 +251,9 @@ class ClaudeSalesBrain:
         stage = str(data.get("stage") or "conversacion").strip()
         if stage not in {"conversacion", "interesado"}:
             stage = "conversacion"
+        confidence = str(data.get("confidence") or "medium").strip().lower()
+        if confidence not in {"low", "medium", "high"}:
+            confidence = "medium"
         return BrainDecision(
             reply=reply,
             intent=intent,
@@ -240,6 +262,11 @@ class ClaudeSalesBrain:
             followup_note=str(data.get("followUpNote") or "Seguimiento WhatsApp AI").strip()[:240],
             followup_minutes=followup_minutes,
             stage=stage,
+            handoff_reason=str(data.get("handoffReason") or "").strip()[:240],
+            handoff_trigger=str(data.get("handoffTrigger") or intent).strip()[:120],
+            handoff_summary=str(data.get("handoffSummary") or "").strip()[:500],
+            recommended_next_step=str(data.get("recommendedNextStep") or "").strip()[:300],
+            confidence=confidence,
         )
 
     @staticmethod

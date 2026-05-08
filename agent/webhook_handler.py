@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 from .security import mask_phone, verify_meta_signature
 
 
 logger = logging.getLogger("club_commerce.whatsapp_agent")
+
+MAX_INBOUND_MESSAGE_LENGTH = 1500
+SEEN_MESSAGE_TTL_SECONDS = 60 * 60 * 24
+SEEN_MESSAGE_LIMIT = 5000
+_seen_message_ids: dict[str, float] = {}
 
 
 class WebhookHTTPError(RuntimeError):
@@ -95,6 +101,33 @@ def should_pause_for_human_takeover(brain: Any, inbound: Any) -> dict[str, Any]:
     return {"pause": True, "mode": mode, "lead": lead}
 
 
+def _cleanup_seen_message_ids(now: float) -> None:
+    if len(_seen_message_ids) <= SEEN_MESSAGE_LIMIT:
+        expired = [key for key, seen_at in _seen_message_ids.items() if now - seen_at > SEEN_MESSAGE_TTL_SECONDS]
+    else:
+        ordered = sorted(_seen_message_ids.items(), key=lambda item: item[1])
+        expired = [key for key, _ in ordered[: max(1, len(ordered) - SEEN_MESSAGE_LIMIT)]]
+    for key in expired:
+        _seen_message_ids.pop(key, None)
+
+
+def is_duplicate_message(provider_name: str, provider_message_id: str | None) -> bool:
+    message_id = str(provider_message_id or "").strip()
+    if not message_id:
+        return False
+    key = f"{provider_name}:{message_id}"
+    now = time.time()
+    _cleanup_seen_message_ids(now)
+    if key in _seen_message_ids:
+        return True
+    _seen_message_ids[key] = now
+    return False
+
+
+def reset_seen_messages_for_tests() -> None:
+    _seen_message_ids.clear()
+
+
 async def process_webhook_body(
     body: bytes,
     signature_header: str | None,
@@ -157,6 +190,27 @@ async def process_webhook_body(
         logger.info("POST /webhook ignored: provider returned no inbound message")
         return {"ok": True, "ignored": True}
 
+    provider_name = getattr(provider, "name", "unknown")
+    if is_duplicate_message(provider_name, getattr(inbound, "provider_message_id", None)):
+        logger.info(
+            "POST /webhook ignored duplicate provider=%s messageIdPresent=%s",
+            provider_name,
+            bool(getattr(inbound, "provider_message_id", None)),
+        )
+        return {"ok": True, "ignored": True, "duplicate": True}
+
+    inbound_text = str(getattr(inbound, "text", "") or "").strip()
+    if not inbound_text:
+        logger.info("POST /webhook ignored empty message phone=%s", mask_phone(getattr(inbound, "phone", None)))
+        return {"ok": True, "ignored": True, "reason": "empty_message"}
+    if len(inbound_text) > MAX_INBOUND_MESSAGE_LENGTH:
+        logger.warning(
+            "POST /webhook ignored oversized message phone=%s length=%s",
+            mask_phone(getattr(inbound, "phone", None)),
+            len(inbound_text),
+        )
+        return {"ok": True, "ignored": True, "reason": "message_too_long"}
+
     try:
         pause = should_pause_for_human_takeover(brain, inbound)
         if pause.get("pause"):
@@ -174,11 +228,24 @@ async def process_webhook_body(
             }
         reply = brain.handle_message(
             phone=inbound.phone,
-            message=inbound.text,
+            message=inbound_text,
             name=inbound.name,
             email=inbound.email,
         )
+        logger.info(
+            "POST /webhook message processed provider=%s phone=%s intent=%s handoff=%s",
+            getattr(provider, "name", "unknown"),
+            mask_phone(getattr(inbound, "phone", None)),
+            getattr(reply, "intent", ""),
+            bool(getattr(reply, "handoff", False)),
+        )
         send_result = provider.send_message(inbound.phone, reply.message)
+        logger.info(
+            "POST /webhook send success provider=%s phone=%s ok=%s",
+            getattr(provider, "name", "unknown"),
+            mask_phone(getattr(inbound, "phone", None)),
+            bool(send_result.get("ok", False)) if isinstance(send_result, dict) else False,
+        )
     except Exception as exc:
         logger.exception(
             "POST /webhook processing failed provider=%s phone=%s error=%s",

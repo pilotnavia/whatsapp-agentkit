@@ -20,7 +20,7 @@ from agent.providers.base import IncomingMessage, WhatsAppProviderError
 from agent.security import mask_phone, sign_meta_payload, verify_meta_signature
 from agent.seller_agent import ClubCommerceSellerAgent
 from agent.tools import CRMSalesTools
-from agent.webhook_handler import WebhookHTTPError, process_webhook_body
+from agent.webhook_handler import WebhookHTTPError, process_webhook_body, reset_seen_messages_for_tests
 
 
 class FakeCRMClient:
@@ -148,9 +148,12 @@ class FakeMetaProviderForWebhook:
             return None
         if message.get("type") != "text":
             return None
+        text = (message.get("text") or {}).get("body", "")
+        if not str(text).strip():
+            return None
         return IncomingMessage(
             phone=message.get("from", ""),
-            text=(message.get("text") or {}).get("body", ""),
+            text=text,
             name="Webhook Test",
             provider_message_id=message.get("id"),
             raw=payload,
@@ -188,18 +191,18 @@ def meta_settings(secret: str = "app-secret-for-test") -> SimpleNamespace:
     return SimpleNamespace(whatsapp_provider="meta", meta_app_secret=secret)
 
 
-def sample_meta_payload(with_messages: bool = True) -> dict[str, Any]:
+def sample_meta_payload(with_messages: bool = True, message_id: str = "wamid.test", message_type: str = "text", body: str = "Hola, quiero informacion") -> dict[str, Any]:
     value: dict[str, Any] = {}
     if with_messages:
         value["contacts"] = [{"profile": {"name": "Lead Meta"}}]
-        value["messages"] = [
-            {
-                "from": "17865550100",
-                "id": "wamid.test",
-                "type": "text",
-                "text": {"body": "Hola, quiero informacion"},
-            }
-        ]
+        message = {
+            "from": "17865550100",
+            "id": message_id,
+            "type": message_type,
+        }
+        if message_type == "text":
+            message["text"] = {"body": body}
+        value["messages"] = [message]
     return {
         "object": "whatsapp_business_account",
         "entry": [
@@ -431,6 +434,7 @@ def test_w5_meta_signature_security() -> None:
 
 
 def test_webhook_missing_signature_is_401() -> None:
+    reset_seen_messages_for_tests()
     body = json.dumps(sample_meta_payload()).encode("utf-8")
     try:
         asyncio.run(
@@ -452,6 +456,7 @@ def test_webhook_missing_signature_is_401() -> None:
 
 
 def test_webhook_without_messages_is_ignored() -> None:
+    reset_seen_messages_for_tests()
     payload = sample_meta_payload(with_messages=False)
     body = json.dumps(payload).encode("utf-8")
     signature = sign_meta_payload(body, "app-secret-for-test")
@@ -470,7 +475,8 @@ def test_webhook_without_messages_is_ignored() -> None:
 
 
 def test_webhook_sample_message_never_crashes_on_send_failure() -> None:
-    payload = sample_meta_payload(with_messages=True)
+    reset_seen_messages_for_tests()
+    payload = sample_meta_payload(with_messages=True, message_id="wamid.send.failure")
     body = json.dumps(payload).encode("utf-8")
     signature = sign_meta_payload(body, "app-secret-for-test")
     result = asyncio.run(
@@ -490,6 +496,7 @@ def test_webhook_sample_message_never_crashes_on_send_failure() -> None:
 
 
 def test_webhook_human_takeover_pauses_auto_reply() -> None:
+    reset_seen_messages_for_tests()
     fake = FakeCRMClient()
     fake.lead["whatsapp"] = {
         "mode": "human",
@@ -498,7 +505,7 @@ def test_webhook_human_takeover_pauses_auto_reply() -> None:
     }
     provider = FakeMetaProviderForWebhook()
     brain = FakeBrainForWebhook(CRMSalesTools(fake))
-    payload = sample_meta_payload(with_messages=True)
+    payload = sample_meta_payload(with_messages=True, message_id="wamid.takeover")
     body = json.dumps(payload).encode("utf-8")
     signature = sign_meta_payload(body, "app-secret-for-test")
     result = asyncio.run(
@@ -520,6 +527,107 @@ def test_webhook_human_takeover_pauses_auto_reply() -> None:
     print("Webhook human takeover pause OK")
 
 
+def test_w13_duplicate_message_is_ignored() -> None:
+    reset_seen_messages_for_tests()
+    payload = sample_meta_payload(with_messages=True, message_id="wamid.duplicate")
+    body = json.dumps(payload).encode("utf-8")
+    signature = sign_meta_payload(body, "app-secret-for-test")
+    provider = FakeMetaProviderForWebhook()
+    brain = FakeBrainForWebhook()
+    first = asyncio.run(
+        process_webhook_body(
+            body,
+            signature,
+            current_settings=meta_settings(),
+            provider=provider,
+            brain=brain,
+        )
+    )
+    second = asyncio.run(
+        process_webhook_body(
+            body,
+            signature,
+            current_settings=meta_settings(),
+            provider=provider,
+            brain=brain,
+        )
+    )
+    assert first["ok"] is True
+    assert second["ignored"] is True
+    assert second["duplicate"] is True
+    assert brain.calls == 1
+    assert len(provider.sent) == 1
+
+    print("W13 duplicate message ignored OK")
+
+
+def test_w13_empty_message_is_ignored() -> None:
+    reset_seen_messages_for_tests()
+    payload = sample_meta_payload(with_messages=True, message_id="wamid.empty", body="   ")
+    body = json.dumps(payload).encode("utf-8")
+    signature = sign_meta_payload(body, "app-secret-for-test")
+    brain = FakeBrainForWebhook()
+    result = asyncio.run(
+        process_webhook_body(
+            body,
+            signature,
+            current_settings=meta_settings(),
+            provider=FakeMetaProviderForWebhook(),
+            brain=brain,
+        )
+    )
+    assert result["ok"] is True
+    assert result["ignored"] is True
+    assert brain.calls == 0
+
+    print("W13 empty message ignored OK")
+
+
+def test_w13_unsupported_type_is_ignored() -> None:
+    reset_seen_messages_for_tests()
+    payload = sample_meta_payload(with_messages=True, message_id="wamid.image", message_type="image")
+    body = json.dumps(payload).encode("utf-8")
+    signature = sign_meta_payload(body, "app-secret-for-test")
+    brain = FakeBrainForWebhook()
+    result = asyncio.run(
+        process_webhook_body(
+            body,
+            signature,
+            current_settings=meta_settings(),
+            provider=FakeMetaProviderForWebhook(),
+            brain=brain,
+        )
+    )
+    assert result["ok"] is True
+    assert result["ignored"] is True
+    assert brain.calls == 0
+
+    print("W13 unsupported message ignored OK")
+
+
+def test_w13_oversized_message_is_ignored() -> None:
+    reset_seen_messages_for_tests()
+    payload = sample_meta_payload(with_messages=True, message_id="wamid.long", body="x" * 1601)
+    body = json.dumps(payload).encode("utf-8")
+    signature = sign_meta_payload(body, "app-secret-for-test")
+    brain = FakeBrainForWebhook()
+    result = asyncio.run(
+        process_webhook_body(
+            body,
+            signature,
+            current_settings=meta_settings(),
+            provider=FakeMetaProviderForWebhook(),
+            brain=brain,
+        )
+    )
+    assert result["ok"] is True
+    assert result["ignored"] is True
+    assert result["reason"] == "message_too_long"
+    assert brain.calls == 0
+
+    print("W13 oversized message ignored OK")
+
+
 def main() -> None:
     test_w2_fallback_agent()
     test_w12_ecommerce_playbook_fallback()
@@ -531,6 +639,10 @@ def main() -> None:
     test_webhook_without_messages_is_ignored()
     test_webhook_sample_message_never_crashes_on_send_failure()
     test_webhook_human_takeover_pauses_auto_reply()
+    test_w13_duplicate_message_is_ignored()
+    test_w13_empty_message_is_ignored()
+    test_w13_unsupported_type_is_ignored()
+    test_w13_oversized_message_is_ignored()
 
 
 if __name__ == "__main__":

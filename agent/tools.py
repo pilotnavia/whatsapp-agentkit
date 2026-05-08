@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import re
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
+
+
+logger = logging.getLogger("club_commerce.whatsapp_agent")
 
 
 class CRMClientProtocol(Protocol):
@@ -40,6 +44,13 @@ def normalize_phone(value: str | None) -> str:
     if not value:
         return ""
     return re.sub(r"\D+", "", value)
+
+
+def mask_phone(value: str | None) -> str:
+    normalized = normalize_phone(value)
+    if len(normalized) <= 4:
+        return "***"
+    return f"***{normalized[-4:]}"
 
 
 def utc_in(minutes: int) -> str:
@@ -202,7 +213,13 @@ class CRMSalesTools:
                 "channel": "whatsapp",
             },
         }
-        return self.crm.upsert_lead(payload)
+        try:
+            response = self.crm.upsert_lead(payload)
+        except Exception as exc:
+            logger.warning("CRM upsert failed phone=%s error=%s", mask_phone(clean_phone), type(exc).__name__)
+            raise
+        logger.info("CRM upsert success phone=%s ok=%s", mask_phone(clean_phone), bool(response.get("ok", True)))
+        return response
 
     def create_followup(
         self,
@@ -211,13 +228,19 @@ class CRMSalesTools:
         minutes_from_now: int = 1440,
         followup_type: str = "whatsapp",
     ) -> dict[str, Any]:
-        return self.crm.create_followup(
-            lead_id=lead_id,
-            scheduled_at=utc_in(minutes_from_now),
-            note=note,
-            followup_type=followup_type,
-            status="pending",
-        )
+        try:
+            response = self.crm.create_followup(
+                lead_id=lead_id,
+                scheduled_at=utc_in(minutes_from_now),
+                note=note,
+                followup_type=followup_type,
+                status="pending",
+            )
+        except Exception as exc:
+            logger.warning("CRM follow-up failed lead=%s error=%s", lead_id, type(exc).__name__)
+            raise
+        logger.info("CRM follow-up success lead=%s ok=%s", lead_id, bool(response.get("ok", True)))
+        return response
 
     def log_activity(
         self,
@@ -236,13 +259,20 @@ class CRMSalesTools:
         note: str,
         email: str | None = None,
     ) -> dict[str, Any]:
-        return self.crm.request_human_handoff(
-            lead_id=lead_id,
-            phone=normalize_phone(phone),
-            email=email,
-            reason=reason,
-            note=note,
-        )
+        clean_phone = normalize_phone(phone)
+        try:
+            response = self.crm.request_human_handoff(
+                lead_id=lead_id,
+                phone=clean_phone,
+                email=email,
+                reason=reason,
+                note=note,
+            )
+        except Exception as exc:
+            logger.warning("CRM handoff failed lead=%s phone=%s error=%s", lead_id, mask_phone(clean_phone), type(exc).__name__)
+            raise
+        logger.info("CRM handoff success lead=%s phone=%s ok=%s", lead_id, mask_phone(clean_phone), bool(response.get("ok", True)))
+        return response
 
     def get_products(self) -> list[dict[str, Any]]:
         response = self.crm.get_products()

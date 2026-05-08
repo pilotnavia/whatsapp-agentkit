@@ -7,7 +7,9 @@ service once provider credentials are configured in W3/W4.
 from __future__ import annotations
 
 import logging
+import os
 import secrets
+import time
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -35,8 +37,17 @@ memory = ConversationMemory(settings.memory_path)
 anthropic_client = AnthropicClient(settings.anthropic_api_key, settings.anthropic_model)
 seller_brain = ClaudeSalesBrain(sales_tools, memory, anthropic_client)
 whatsapp_provider = build_provider(settings)
+START_TIME = time.time()
 
 app = FastAPI(title="Club Commerce WhatsApp Sales Agent", version="0.4.0")
+
+
+def runtime_commit() -> str:
+    for key in ("RENDER_GIT_COMMIT", "RAILWAY_GIT_COMMIT_SHA", "VERCEL_GIT_COMMIT_SHA", "GIT_COMMIT"):
+        value = os.getenv(key, "").strip()
+        if value:
+            return value[:12]
+    return "local"
 
 
 class SimulateMessage(BaseModel):
@@ -96,6 +107,27 @@ def debug_config() -> dict[str, Any]:
             and settings.meta_app_secret
         ),
         "graphVersion": settings.meta_graph_version,
+    }
+
+
+@app.get("/debug/status")
+def debug_status() -> dict[str, Any]:
+    """Non-secret operational status for production checks."""
+    return {
+        "ok": True,
+        "provider": settings.whatsapp_provider,
+        "crmConfigured": settings.crm_ready,
+        "claudeConfigured": anthropic_client.ready,
+        "metaConfigured": bool(
+            settings.meta_access_token
+            and settings.meta_phone_number_id
+            and settings.meta_verify_token
+            and settings.meta_app_secret
+        ),
+        "memoryPath": settings.memory_path,
+        "uptime": round(time.time() - START_TIME, 2),
+        "version": app.version,
+        "commit": runtime_commit(),
     }
 
 

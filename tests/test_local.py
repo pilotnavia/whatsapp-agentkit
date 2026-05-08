@@ -554,7 +554,8 @@ def test_webhook_human_takeover_pauses_auto_reply() -> None:
     assert result["mode"] == "human"
     assert brain.calls == 0
     assert provider.sent == []
-    assert any(item["type"] == "whatsapp_inbound_paused" for item in fake.activities)
+    assert any(item["type"] == "whatsapp_inbound" and item["message"] == "Hola, quiero informacion" for item in fake.activities)
+    assert any(item["type"] == "whatsapp_system" for item in fake.activities)
 
     print("Webhook human takeover pause OK")
 
@@ -565,7 +566,8 @@ def test_w13_duplicate_message_is_ignored() -> None:
     body = json.dumps(payload).encode("utf-8")
     signature = sign_meta_payload(body, "app-secret-for-test")
     provider = FakeMetaProviderForWebhook()
-    brain = FakeBrainForWebhook()
+    fake = FakeCRMClient()
+    brain = FakeBrainForWebhook(CRMSalesTools(fake))
     first = asyncio.run(
         process_webhook_body(
             body,
@@ -589,6 +591,12 @@ def test_w13_duplicate_message_is_ignored() -> None:
     assert second["duplicate"] is True
     assert brain.calls == 1
     assert len(provider.sent) == 1
+    assert any(
+        item["type"] == "whatsapp_outbound_bot"
+        and item["message"] == "Respuesta controlada"
+        and item["meta"].get("sender") == "bot"
+        for item in fake.activities
+    )
 
     print("W13 duplicate message ignored OK")
 

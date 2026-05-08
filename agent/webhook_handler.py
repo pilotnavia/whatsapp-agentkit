@@ -82,13 +82,30 @@ def should_pause_for_human_takeover(brain: Any, inbound: Any) -> dict[str, Any]:
     lead_id = lead.get("id") if isinstance(lead, dict) else None
     try:
         if hasattr(tools, "log_activity"):
+            inbound_text = str(getattr(inbound, "text", "") or "")
             tools.log_activity(
-                "WhatsApp inbound recibido sin respuesta automatica por takeover humano",
+                inbound_text,
                 lead_id=lead_id,
-                activity_type="whatsapp_inbound_paused",
+                activity_type="whatsapp_inbound",
                 meta={
                     "mode": mode,
                     "channel": "whatsapp",
+                    "direction": "inbound",
+                    "sender": "lead",
+                    "body": inbound_text,
+                    "text": inbound_text,
+                    "messageId": getattr(inbound, "provider_message_id", None),
+                    "status": "received",
+                },
+            )
+            tools.log_activity(
+                "WhatsApp inbound recibido sin respuesta automatica por takeover humano",
+                lead_id=lead_id,
+                activity_type="whatsapp_system",
+                meta={
+                    "mode": mode,
+                    "channel": "whatsapp",
+                    "sender": "system",
                     "messagePreview": str(getattr(inbound, "text", "") or "")[:180],
                 },
             )
@@ -99,6 +116,57 @@ def should_pause_for_human_takeover(brain: Any, inbound: Any) -> dict[str, Any]:
             type(exc).__name__,
         )
     return {"pause": True, "mode": mode, "lead": lead}
+
+
+def provider_message_id_from_send_result(send_result: dict[str, Any] | None) -> str | None:
+    if not isinstance(send_result, dict):
+        return None
+    for key in ("providerMessageId", "messageId", "id"):
+        value = send_result.get(key)
+        if value:
+            return str(value)
+    response = send_result.get("response")
+    if isinstance(response, dict):
+        messages = response.get("messages")
+        if isinstance(messages, list) and messages and isinstance(messages[0], dict):
+            value = messages[0].get("id")
+            if value:
+                return str(value)
+    return None
+
+
+def log_outbound_bot_message(brain: Any, inbound: Any, reply: Any, send_result: dict[str, Any] | None) -> None:
+    tools = getattr(brain, "tools", None)
+    if not tools or not hasattr(tools, "log_activity"):
+        return
+    lead = getattr(reply, "lead", None)
+    lead_id = lead.get("id") if isinstance(lead, dict) else None
+    message = str(getattr(reply, "message", "") or "").strip()
+    if not message:
+        return
+    try:
+        tools.log_activity(
+            message,
+            lead_id=lead_id,
+            activity_type="whatsapp_outbound_bot",
+            meta={
+                "channel": "whatsapp",
+                "direction": "outbound",
+                "sender": "bot",
+                "body": message,
+                "text": message,
+                "status": "sent" if isinstance(send_result, dict) and send_result.get("ok") else "unknown",
+                "messageId": provider_message_id_from_send_result(send_result),
+                "intent": getattr(reply, "intent", ""),
+                "handoff": bool(getattr(reply, "handoff", False)),
+            },
+        )
+    except Exception as exc:
+        logger.warning(
+            "POST /webhook outbound transcript log failed phone=%s error=%s",
+            mask_phone(getattr(inbound, "phone", None)),
+            type(exc).__name__,
+        )
 
 
 def _cleanup_seen_message_ids(now: float) -> None:
@@ -240,6 +308,7 @@ async def process_webhook_body(
             bool(getattr(reply, "handoff", False)),
         )
         send_result = provider.send_message(inbound.phone, reply.message)
+        log_outbound_bot_message(brain, inbound, reply, send_result)
         logger.info(
             "POST /webhook send success provider=%s phone=%s ok=%s",
             getattr(provider, "name", "unknown"),

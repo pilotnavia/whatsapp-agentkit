@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import os
-import secrets
 import time
 from typing import Any
 
@@ -16,6 +15,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import PlainTextResponse
 
+from .api_auth import agent_api_key_valid
 from .anthropic_client import AnthropicClient
 from .brain import ClaudeSalesBrain
 from .config import load_settings
@@ -63,10 +63,15 @@ class SendMessagePayload(BaseModel):
     leadId: str | None = None
 
 
+class SendTemplatePayload(BaseModel):
+    phone: str = Field(..., min_length=5)
+    templateName: str = Field(..., min_length=1, max_length=120)
+    languageCode: str = Field(default="en_US", min_length=2, max_length=20)
+    components: list[dict[str, Any]] = Field(default_factory=list)
+
+
 def require_agent_api_key(api_key: str | None) -> None:
-    expected = settings.agent_api_key
-    provided = api_key or ""
-    if not expected or not secrets.compare_digest(provided, expected):
+    if not agent_api_key_valid(api_key, settings.agent_api_key):
         raise HTTPException(status_code=401, detail="Invalid agent API key")
 
 
@@ -175,6 +180,42 @@ def send_message(payload: SendMessagePayload, x_agent_api_key: str | None = Head
     except WhatsAppProviderError as exc:
         logger.warning("Manual WhatsApp send failed phone=%s error=%s", mask_phone(payload.phone), type(exc).__name__)
         raise HTTPException(status_code=502, detail="WhatsApp provider send failed") from exc
+
+    response = result.get("response") if isinstance(result, dict) else {}
+    messages = response.get("messages") if isinstance(response, dict) else []
+    provider_message_id = ""
+    if isinstance(messages, list) and messages and isinstance(messages[0], dict):
+        provider_message_id = str(messages[0].get("id") or "")
+    return {"ok": True, "providerMessageId": provider_message_id}
+
+
+@app.post("/api/send-template")
+def send_template(payload: SendTemplatePayload, x_agent_api_key: str | None = Header(default=None)) -> dict[str, Any]:
+    require_agent_api_key(x_agent_api_key)
+    if settings.whatsapp_provider != "meta" or getattr(whatsapp_provider, "name", "") != "meta":
+        raise HTTPException(status_code=409, detail="WhatsApp template send requires WHATSAPP_PROVIDER=meta")
+
+    logger.info(
+        "POST /api/send-template provider=%s phone=%s template=%s",
+        getattr(whatsapp_provider, "name", "unknown"),
+        mask_phone(payload.phone),
+        payload.templateName,
+    )
+    try:
+        result = whatsapp_provider.send_template(
+            payload.phone,
+            payload.templateName.strip(),
+            payload.languageCode.strip() or "en_US",
+            payload.components,
+        )
+    except WhatsAppProviderError as exc:
+        logger.warning(
+            "WhatsApp template send failed phone=%s template=%s error=%s",
+            mask_phone(payload.phone),
+            payload.templateName,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=502, detail="WhatsApp provider template send failed") from exc
 
     response = result.get("response") if isinstance(result, dict) else {}
     messages = response.get("messages") if isinstance(response, dict) else []

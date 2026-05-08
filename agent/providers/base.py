@@ -25,6 +25,14 @@ class WhatsAppProvider(Protocol):
 
     def send_message(self, phone: str, text: str) -> dict[str, Any]: ...
 
+    def send_template(
+        self,
+        phone: str,
+        template_name: str,
+        language_code: str = "en_US",
+        components: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]: ...
+
     def parse_webhook(self, payload: dict[str, Any]) -> IncomingMessage | None: ...
 
     def verify_webhook(self, request_or_query: Any) -> str | None: ...
@@ -36,4 +44,3 @@ def query_value(request_or_query: Any, key: str) -> str:
     if isinstance(request_or_query, Mapping):
         return str(request_or_query.get(key, "")).strip()
     return ""
-

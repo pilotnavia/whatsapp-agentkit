@@ -13,6 +13,7 @@ from typing import Any
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from agent.api_auth import agent_api_key_valid
 from agent.brain import ClaudeSalesBrain
 from agent.memory import ConversationMemory
 from agent.providers import MetaWhatsAppProvider, MockWhatsAppProvider
@@ -419,6 +420,37 @@ def test_w4_meta_provider_parse() -> None:
     print("W4 Meta provider parse simulation OK")
 
 
+def test_w14_template_provider_foundation() -> None:
+    mock = MockWhatsAppProvider(verify_token="verify-me")
+    mock_result = mock.send_template("+17865550100", "hello_world", "en_US", [])
+    assert mock_result["ok"] is True
+    assert mock_result["provider"] == "mock"
+    assert mock.sent_templates[-1]["templateName"] == "hello_world"
+
+    meta = MetaWhatsAppProvider(
+        access_token="token-not-used",
+        phone_number_id="123456",
+        verify_token="meta-verify",
+    )
+    payload = meta.build_template_payload(
+        "+17865550100",
+        "lead_followup_1",
+        "es",
+        [{"type": "body", "parameters": [{"type": "text", "text": "Adrian"}]}],
+    )
+    assert payload["to"] == "+17865550100"
+    assert payload["type"] == "template"
+    assert payload["template"]["name"] == "lead_followup_1"
+    assert payload["template"]["language"]["code"] == "es"
+    assert payload["template"]["components"][0]["type"] == "body"
+
+    assert agent_api_key_valid(None, "expected-key") is False
+    assert agent_api_key_valid("bad-key", "expected-key") is False
+    assert agent_api_key_valid("expected-key", "expected-key") is True
+
+    print("W14 template provider foundation OK")
+
+
 def test_w5_meta_signature_security() -> None:
     body = b'{"entry":[{"changes":[{"value":{"messages":[]}}]}]}'
     secret = "app-secret-for-test"
@@ -634,6 +666,7 @@ def main() -> None:
     test_w3_claude_brain()
     test_w4_mock_provider()
     test_w4_meta_provider_parse()
+    test_w14_template_provider_foundation()
     test_w5_meta_signature_security()
     test_webhook_missing_signature_is_401()
     test_webhook_without_messages_is_ignored()

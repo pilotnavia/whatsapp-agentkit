@@ -31,17 +31,17 @@ class MetaWhatsAppProvider:
     def configured(self) -> bool:
         return bool(self.access_token and self.phone_number_id)
 
-    def send_message(self, phone: str, text: str) -> dict[str, Any]:
+    def _send_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.configured:
             raise WhatsAppProviderError("Meta WhatsApp provider is not configured")
 
         url = f"https://graph.facebook.com/{self.graph_version}/{self.phone_number_id}/messages"
+        return self._post_json(url, payload)
+
+    def _post_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         payload = {
             "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": phone,
-            "type": "text",
-            "text": {"preview_url": False, "body": text},
+            **payload,
         }
         req = urllib.request.Request(
             url,
@@ -67,6 +67,46 @@ class MetaWhatsAppProvider:
         except json.JSONDecodeError as exc:
             raise WhatsAppProviderError("Meta returned invalid JSON") from exc
         return {"ok": True, "provider": self.name, "response": data}
+
+    def build_text_payload(self, phone: str, text: str) -> dict[str, Any]:
+        return {
+            "recipient_type": "individual",
+            "to": phone,
+            "type": "text",
+            "text": {"preview_url": False, "body": text},
+        }
+
+    def build_template_payload(
+        self,
+        phone: str,
+        template_name: str,
+        language_code: str = "en_US",
+        components: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "recipient_type": "individual",
+            "to": phone,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {"code": language_code},
+            },
+        }
+        if components:
+            payload["template"]["components"] = components
+        return payload
+
+    def send_message(self, phone: str, text: str) -> dict[str, Any]:
+        return self._send_payload(self.build_text_payload(phone, text))
+
+    def send_template(
+        self,
+        phone: str,
+        template_name: str,
+        language_code: str = "en_US",
+        components: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return self._send_payload(self.build_template_payload(phone, template_name, language_code, components))
 
     def parse_webhook(self, payload: dict[str, Any]) -> IncomingMessage | None:
         try:
@@ -106,4 +146,3 @@ class MetaWhatsAppProvider:
         if mode == "subscribe" and token == self.verify_token and challenge:
             return challenge
         return None
-

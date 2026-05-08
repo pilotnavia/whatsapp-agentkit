@@ -13,11 +13,28 @@ class MockWhatsAppProvider:
     def __init__(self, verify_token: str = "mock-verify"):
         self.verify_token = verify_token
         self.sent_messages: list[dict[str, str]] = []
+        self.sent_templates: list[dict[str, Any]] = []
 
     def send_message(self, phone: str, text: str) -> dict[str, Any]:
         item = {"phone": phone, "text": text}
         self.sent_messages.append(item)
         return {"ok": True, "provider": self.name, "message": item}
+
+    def send_template(
+        self,
+        phone: str,
+        template_name: str,
+        language_code: str = "en_US",
+        components: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        item = {
+            "phone": phone,
+            "templateName": template_name,
+            "languageCode": language_code,
+            "components": components or [],
+        }
+        self.sent_templates.append(item)
+        return {"ok": True, "provider": self.name, "template": item}
 
     def parse_webhook(self, payload: dict[str, Any]) -> IncomingMessage | None:
         phone = str(payload.get("phone") or payload.get("from") or "").strip()
@@ -40,4 +57,3 @@ class MockWhatsAppProvider:
         if mode == "subscribe" and token == self.verify_token and challenge:
             return challenge
         return None
-

@@ -135,5 +135,12 @@ class CRMClient:
             },
         )
 
+    def submit_qualification(self, lead_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/agent/leads/{urllib.parse.quote(str(lead_id), safe='')}/qualification",
+            payload=payload,
+        )
+
     def get_products(self) -> dict[str, Any]:
         return self._request("GET", "/api/agent/products")

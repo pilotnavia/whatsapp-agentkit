@@ -28,6 +28,8 @@ class Settings:
     meta_app_secret: str
     meta_graph_version: str
     agent_api_key: str
+    ai_qualification_min_score: int
+    ai_qualification_template: str
 
     @property
     def crm_ready(self) -> bool:
@@ -51,6 +53,12 @@ def load_settings() -> Settings:
         port = int(port_raw)
     except ValueError:
         port = 8000
+    score_raw = _env("AI_QUALIFICATION_MIN_SCORE", "70")
+    try:
+        ai_qualification_min_score = int(score_raw)
+    except ValueError:
+        ai_qualification_min_score = 70
+    ai_qualification_min_score = max(1, min(ai_qualification_min_score, 100))
 
     return Settings(
         crm_api_url=_env("CRM_API_URL", "http://127.0.0.1:4173").rstrip("/"),
@@ -69,4 +77,6 @@ def load_settings() -> Settings:
         meta_app_secret=_env("META_APP_SECRET"),
         meta_graph_version=_env("META_GRAPH_VERSION", "v20.0"),
         agent_api_key=_env("AGENT_API_KEY"),
+        ai_qualification_min_score=ai_qualification_min_score,
+        ai_qualification_template=_env("AI_QUALIFICATION_TEMPLATE", "hello_world"),
     )

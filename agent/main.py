@@ -35,7 +35,7 @@ crm_client = CRMClient(settings.crm_api_url, settings.crm_api_key)
 sales_tools = CRMSalesTools(crm_client)
 memory = ConversationMemory(settings.memory_path)
 anthropic_client = AnthropicClient(settings.anthropic_api_key, settings.anthropic_model)
-seller_brain = ClaudeSalesBrain(sales_tools, memory, anthropic_client)
+seller_brain = ClaudeSalesBrain(sales_tools, memory, anthropic_client, settings.ai_qualification_min_score)
 whatsapp_provider = build_provider(settings)
 START_TIME = time.time()
 
@@ -94,6 +94,7 @@ def health() -> dict[str, Any]:
         "crmConfigured": settings.crm_ready,
         "claudeConfigured": anthropic_client.ready,
         "model": settings.anthropic_model if anthropic_client.ready else "fallback-local",
+        "qualificationMinScore": settings.ai_qualification_min_score,
     }
 
 
@@ -112,6 +113,7 @@ def debug_config() -> dict[str, Any]:
             and settings.meta_app_secret
         ),
         "graphVersion": settings.meta_graph_version,
+        "qualificationMinScore": settings.ai_qualification_min_score,
     }
 
 
@@ -130,6 +132,7 @@ def debug_status() -> dict[str, Any]:
             and settings.meta_app_secret
         ),
         "memoryPath": settings.memory_path,
+        "qualificationMinScore": settings.ai_qualification_min_score,
         "uptime": round(time.time() - START_TIME, 2),
         "version": app.version,
         "commit": runtime_commit(),

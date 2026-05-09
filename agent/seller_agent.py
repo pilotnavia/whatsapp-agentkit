@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .sales_prompt import ECOMMERCE_PLAYBOOK, OBJECTION_GUIDE, SYSTEM_PROMPT
-from .tools import CRMSalesTools
+from .tools import CRMSalesTools, ai_qualification_from_message
 
 
 STRONG_INTENT = (
@@ -126,8 +126,9 @@ def _detect_intent(message: str) -> str:
 
 
 class ClubCommerceSellerAgent:
-    def __init__(self, tools: CRMSalesTools):
+    def __init__(self, tools: CRMSalesTools, qualification_min_score: int = 70):
         self.tools = tools
+        self.qualification_min_score = qualification_min_score
         self.system_prompt = SYSTEM_PROMPT
 
     def handle_message(
@@ -178,6 +179,7 @@ class ClubCommerceSellerAgent:
                 confidence="high" if intent == "ready_for_handoff" else "medium",
             )
             tool_results["handoff"] = handoff
+            self._maybe_submit_qualification(lead_id, message, intent, tool_results)
             return AgentReply(
                 message=(
                     "Perfecto, te conecto con alguien del equipo para ayudarte directo. "
@@ -193,6 +195,7 @@ class ClubCommerceSellerAgent:
             products = self.tools.get_products()
             tool_results["products"] = products
             self._safe_followup(lead_id, "Enviar seguimiento de precios por WhatsApp", 180)
+            self._maybe_submit_qualification(lead_id, message, intent, tool_results)
             return AgentReply(
                 message=(
                     "Claro. Estas son las ofertas que tengo disponibles:\n"
@@ -206,6 +209,7 @@ class ClubCommerceSellerAgent:
 
         if intent == "price_objection":
             self._safe_followup(lead_id, "Seguimiento por objecion de precio", 1440)
+            self._maybe_submit_qualification(lead_id, message, intent, tool_results)
             return AgentReply(OBJECTION_GUIDE["precio"], lead, intent, tool_results=tool_results)
 
         if intent == "time_objection":
@@ -222,6 +226,7 @@ class ClubCommerceSellerAgent:
 
         if intent == "budget_capture":
             self._safe_followup(lead_id, "Revisar presupuesto declarado por WhatsApp", 720)
+            self._maybe_submit_qualification(lead_id, message, intent, tool_results)
             return AgentReply(
                 "Perfecto, con ese presupuesto conviene priorizar producto, tienda y validacion antes de escalar ads. "
                 "Ya tienes producto definido o necesitas ayuda encontrando uno?",
@@ -239,6 +244,7 @@ class ClubCommerceSellerAgent:
                 meta={"intent": intent, "channel": "whatsapp", "messagePreview": message[:180]},
             )
             self._safe_followup(lead_id, f"Dar seguimiento a consulta {intent}", 1440)
+            self._maybe_submit_qualification(lead_id, message, intent, tool_results)
             return AgentReply(ecommerce_reply, lead, intent, tool_results=tool_results)
 
         if not name and not self._lead_has_name(lead):
@@ -251,12 +257,26 @@ class ClubCommerceSellerAgent:
             )
 
         self._safe_followup(lead_id, "Dar seguimiento inicial de WhatsApp AI", 1440)
+        self._maybe_submit_qualification(lead_id, message, intent, tool_results)
         return AgentReply(
             "Buenisimo. Para recomendarte bien: ya tienes tienda online o estas empezando desde cero?",
             lead,
             intent,
             tool_results=tool_results,
         )
+
+    def _maybe_submit_qualification(
+        self,
+        lead_id: str | None,
+        message: str,
+        intent: str,
+        tool_results: dict[str, Any],
+    ) -> dict[str, Any]:
+        qualification = ai_qualification_from_message(message, intent, self.qualification_min_score)
+        result = self.tools.submit_ai_qualification(lead_id, qualification)
+        if not result.get("skipped"):
+            tool_results["qualification"] = result
+        return result
 
     def _safe_followup(self, lead_id: str | None, note: str, minutes_from_now: int) -> None:
         if not lead_id:

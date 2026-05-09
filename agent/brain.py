@@ -10,7 +10,7 @@ from .anthropic_client import AnthropicClientError
 from .memory import ConversationMemory
 from .sales_prompt import SYSTEM_PROMPT
 from .seller_agent import AgentReply, ClubCommerceSellerAgent, _detect_intent
-from .tools import CRMSalesTools
+from .tools import CRMSalesTools, ai_qualification_from_message
 
 
 class ModelClient(Protocol):
@@ -41,11 +41,13 @@ class ClaudeSalesBrain:
         tools: CRMSalesTools,
         memory: ConversationMemory,
         model: ModelClient | None = None,
+        qualification_min_score: int = 70,
     ):
         self.tools = tools
         self.memory = memory
         self.model = model
-        self.fallback_agent = ClubCommerceSellerAgent(tools)
+        self.qualification_min_score = qualification_min_score
+        self.fallback_agent = ClubCommerceSellerAgent(tools, qualification_min_score)
 
     def handle_message(
         self,
@@ -143,12 +145,22 @@ class ClaudeSalesBrain:
             )
             tool_results["followup"] = followup
 
+        qualification = ai_qualification_from_message(message, decision.intent, self.qualification_min_score)
+        if decision.handoff and qualification.get("status") == "observing":
+            qualification["status"] = "needs_human"
+            qualification["score"] = max(int(qualification.get("score") or 0), self.qualification_min_score)
+            qualification["reason"] = decision.handoff_reason or qualification.get("reason") or "handoff solicitado"
+        if lead_id:
+            qualification_result = self.tools.submit_ai_qualification(lead_id, qualification)
+            if not qualification_result.get("skipped"):
+                tool_results["qualification"] = qualification_result
+
         self._remember(phone, message, decision.reply, {"intent": decision.intent, "mode": "claude"})
         return AgentReply(
             message=decision.reply,
             lead=lead if isinstance(lead, dict) else None,
             intent=decision.intent,
-            handoff=decision.handoff,
+            handoff=decision.handoff or qualification.get("status") in {"qualified", "needs_human"},
             tool_results=tool_results,
         )
 

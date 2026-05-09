@@ -36,7 +36,12 @@ class CRMClientProtocol(Protocol):
         email: str | None = None,
         reason: str = "",
         note: str = "",
+        handoff_trigger: str = "",
+        handoff_summary: str = "",
+        recommended_next_step: str = "",
+        confidence: str = "medium",
     ) -> dict[str, Any]: ...
+    def submit_qualification(self, lead_id: str, payload: dict[str, Any]) -> dict[str, Any]: ...
     def get_products(self) -> dict[str, Any]: ...
 
 
@@ -163,6 +168,91 @@ def ecommerce_context_from_message(message: str, intent: str | None = None) -> d
     return {"answers": answers, "summary": summary, "topics": topics, "recommendedProduct": recommended}
 
 
+def answer_value(context: dict[str, Any], key: str) -> str:
+    for item in context.get("answers", []):
+        if item.get("key") == key:
+            return str(item.get("value") or "")
+    return ""
+
+
+def ai_qualification_from_message(
+    message: str,
+    intent: str | None = None,
+    min_score: int = 70,
+) -> dict[str, Any]:
+    text = message.casefold()
+    context = ecommerce_context_from_message(message, intent)
+    score = 20
+    reasons: list[str] = []
+
+    if intent in {"ready_for_handoff", "needs_human"} or any(word in text for word in ("comprar", "pagar", "link", "checkout", "llamada", "asesor", "humano")):
+        score += 55
+        reasons.append("intencion fuerte o solicitud humana")
+    if intent in {"pricing", "budget_capture"} or any(word in text for word in ("precio", "cuanto", "cuánto", "plan", "presupuesto", "budget")):
+        score += 20
+        reasons.append("pregunto por precio o presupuesto")
+    if answer_value(context, "budget"):
+        score += 22
+        reasons.append("declaro presupuesto")
+    if context.get("recommendedProduct") or context.get("topics"):
+        score += 14
+        reasons.append("interes/producto claro")
+    if any(word in text for word in ("tengo tienda", "crear tienda", "shopify", "tienda online")):
+        score += 8
+        reasons.append("contexto de tienda")
+    if any(word in text for word in ("perdi dinero", "perdí dinero", "ads", "anuncios", "no vendo", "necesito ayuda", "importar", "china")):
+        score += 14
+        reasons.append("dolor comercial claro")
+    if any(word in text for word in ("urgente", "hoy", "esta semana", "lo antes", "rapido", "rápido")):
+        score += 10
+        reasons.append("urgencia")
+    if intent in {"price_objection", "time_objection", "trust_objection"}:
+        score += 8
+        reasons.append("objecion manejable")
+
+    explicit_unqualified = any(
+        word in text
+        for word in (
+            "no me interesa",
+            "equivocado",
+            "numero equivocado",
+            "número equivocado",
+            "stop",
+            "no escribir",
+            "deja de escribir",
+        )
+    )
+    if explicit_unqualified:
+        score = min(score, 20)
+        reasons.append("rechazo explicito")
+
+    score = max(0, min(score, 100))
+    if explicit_unqualified:
+        status = "unqualified"
+    elif score >= min_score:
+        status = "needs_human" if intent in {"ready_for_handoff", "needs_human"} or score >= 82 else "qualified"
+    else:
+        status = "observing"
+
+    budget = answer_value(context, "budget")
+    objection = answer_value(context, "main_objection")
+    urgency = answer_value(context, "urgency") or ("Alta" if score >= 82 else "")
+    summary = context.get("summary") or f"Lead WhatsApp con intencion {intent or 'discovery'}."
+    reason = ", ".join(reasons[:4]) or "calificacion inicial en curso"
+    return {
+        "status": status,
+        "score": score,
+        "summary": summary[:1000],
+        "reason": reason[:500],
+        "recommendedProduct": context.get("recommendedProduct") or "",
+        "recommendedNextStep": "Tomar la conversacion, confirmar necesidad y guiar al siguiente paso." if status in {"qualified", "needs_human"} else "Continuar calificando con preguntas cortas.",
+        "budget": budget,
+        "urgency": urgency,
+        "objection": objection,
+        "answers": context.get("answers", []),
+    }
+
+
 class CRMSalesTools:
     def __init__(self, crm: CRMClientProtocol):
         self.crm = crm
@@ -280,6 +370,37 @@ class CRMSalesTools:
             logger.warning("CRM handoff failed lead=%s phone=%s error=%s", lead_id, mask_phone(clean_phone), type(exc).__name__)
             raise
         logger.info("CRM handoff success lead=%s phone=%s ok=%s", lead_id, mask_phone(clean_phone), bool(response.get("ok", True)))
+        return response
+
+    def submit_ai_qualification(self, lead_id: str | None, qualification: dict[str, Any]) -> dict[str, Any]:
+        if not lead_id:
+            return {"ok": False, "skipped": True, "reason": "missing_lead_id"}
+        status = qualification.get("status")
+        if status not in {"qualified", "unqualified", "needs_human"}:
+            return {"ok": True, "skipped": True, "status": status}
+        payload = {
+            "status": status,
+            "score": qualification.get("score"),
+            "summary": qualification.get("summary"),
+            "reason": qualification.get("reason"),
+            "recommendedProduct": qualification.get("recommendedProduct"),
+            "recommendedNextStep": qualification.get("recommendedNextStep"),
+            "budget": qualification.get("budget"),
+            "urgency": qualification.get("urgency"),
+            "objection": qualification.get("objection"),
+        }
+        try:
+            response = self.crm.submit_qualification(lead_id, payload)
+        except Exception as exc:
+            logger.warning("CRM qualification failed lead=%s error=%s", lead_id, type(exc).__name__)
+            raise
+        logger.info(
+            "CRM qualification success lead=%s status=%s score=%s ok=%s",
+            lead_id,
+            status,
+            qualification.get("score"),
+            bool(response.get("ok", True)),
+        )
         return response
 
     def get_products(self) -> list[dict[str, Any]]:

@@ -35,6 +35,7 @@ class FakeCRMClient:
         self.followups: list[dict[str, Any]] = []
         self.activities: list[dict[str, Any]] = []
         self.handoffs: list[dict[str, Any]] = []
+        self.qualifications: list[dict[str, Any]] = []
 
     def lookup_lead(self, phone: str | None = None, email: str | None = None) -> dict[str, Any]:
         return {"ok": True, "found": True, "lead": self.lead}
@@ -96,6 +97,11 @@ class FakeCRMClient:
         }
         self.handoffs.append(item)
         return {"ok": True, "handoff": item}
+
+    def submit_qualification(self, lead_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        item = {"leadId": lead_id, **payload}
+        self.qualifications.append(item)
+        return {"ok": True, "qualification": item}
 
     def get_products(self) -> dict[str, Any]:
         return {
@@ -249,6 +255,8 @@ def test_w2_fallback_agent() -> None:
     assert fake.handoffs, "strong intent should request human handoff"
     assert fake.handoffs[-1]["handoffTrigger"] == "high_intent"
     assert fake.handoffs[-1]["recommendedNextStep"]
+    assert fake.qualifications, "strong intent should submit AI qualification"
+    assert fake.qualifications[-1]["status"] in {"qualified", "needs_human"}
     assert fake.activities, "agent should log CRM activity"
 
     print("W2 local simulation OK")
@@ -336,6 +344,8 @@ def test_w3_claude_brain() -> None:
         assert fake.handoffs, "strong intent should request human handoff"
         assert fake.handoffs[-1]["handoffTrigger"] == "payment"
         assert fake.handoffs[-1]["confidence"] == "high"
+        assert fake.qualifications, "Claude strong intent should submit AI qualification"
+        assert fake.qualifications[-1]["status"] in {"qualified", "needs_human"}
         assert len(memory.load("+1 (786) 555-0100")) >= 6
 
     print("W3 Claude brain simulation OK")

@@ -13,6 +13,42 @@ from .seller_agent import AgentReply, ClubCommerceSellerAgent, _detect_intent
 from .tools import CRMSalesTools, ai_qualification_from_message
 
 
+ENGLISH_REPLY_MARKERS = (
+    "how can i",
+    "i can help",
+    "what is your",
+    "do you have",
+    "let me",
+    "sure,",
+    "would you",
+    "tell me",
+    "are you",
+)
+
+SPANISH_REPLY_MARKERS = (
+    "tienda",
+    "producto",
+    "presupuesto",
+    "equipo",
+    "asesor",
+    "ayudo",
+    "quieres",
+    "tienes",
+    "empezando",
+    "ventas",
+    "programa",
+    "precio",
+    "claro",
+)
+
+
+def looks_like_english_customer_reply(reply: str) -> bool:
+    lowered = reply.casefold()
+    english_hits = sum(1 for marker in ENGLISH_REPLY_MARKERS if marker in lowered)
+    spanish_hits = sum(1 for marker in SPANISH_REPLY_MARKERS if marker in lowered)
+    return english_hits >= 2 and spanish_hits == 0
+
+
 class ModelClient(Protocol):
     @property
     def ready(self) -> bool: ...
@@ -203,6 +239,11 @@ class ClaudeSalesBrain:
         catalog = "\n".join(product_lines) if product_lines else "No hay productos cargados para este mensaje."
         return (
             f"{SYSTEM_PROMPT}\n\n"
+            "IDIOMA OBLIGATORIO:\n"
+            "- El campo reply debe estar SIEMPRE en espanol.\n"
+            "- Si el lead escribe en ingles, entiende la intencion y responde en espanol amable.\n"
+            "- No uses Spanglish salvo nombres tecnicos inevitables: Shopify, Meta Ads, dropshipping.\n"
+            "- Maximo 2-5 lineas y una sola pregunta de calificacion a la vez.\n\n"
             "Debes responder SOLO JSON valido, sin markdown, con esta forma:\n"
             "{\n"
             '  "reply": "mensaje final para WhatsApp",\n'
@@ -253,6 +294,8 @@ class ClaudeSalesBrain:
         reply = str(data.get("reply") or "").strip()
         if not reply:
             raise ValueError("Claude decision missing reply")
+        if looks_like_english_customer_reply(reply):
+            raise ValueError("Claude decision reply must be Spanish")
         intent = str(data.get("intent") or fallback_intent).strip() or fallback_intent
         followup_minutes = data.get("followUpMinutes", 1440)
         try:

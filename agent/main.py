@@ -95,6 +95,7 @@ def health() -> dict[str, Any]:
         "claudeConfigured": anthropic_client.ready,
         "model": settings.anthropic_model if anthropic_client.ready else "fallback-local",
         "qualificationMinScore": settings.ai_qualification_min_score,
+        "qualificationLanguage": settings.ai_qualification_language,
     }
 
 
@@ -114,6 +115,7 @@ def debug_config() -> dict[str, Any]:
         ),
         "graphVersion": settings.meta_graph_version,
         "qualificationMinScore": settings.ai_qualification_min_score,
+        "qualificationLanguage": settings.ai_qualification_language,
     }
 
 
@@ -133,6 +135,7 @@ def debug_status() -> dict[str, Any]:
         ),
         "memoryPath": settings.memory_path,
         "qualificationMinScore": settings.ai_qualification_min_score,
+        "qualificationLanguage": settings.ai_qualification_language,
         "uptime": round(time.time() - START_TIME, 2),
         "version": app.version,
         "commit": runtime_commit(),

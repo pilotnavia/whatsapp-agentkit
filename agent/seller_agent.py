@@ -17,33 +17,75 @@ from .tools import CRMSalesTools, ai_qualification_from_message
 
 STRONG_INTENT = (
     "comprar",
+    "buy",
     "pagar",
+    "pay",
+    "payment",
     "inscribir",
     "inscribirme",
+    "sign up",
+    "enroll",
     "quiero entrar",
+    "i want to join",
+    "i want in",
     "link",
     "checkout",
     "tarjeta",
     "zelle",
     "paypal",
     "llamada",
+    "call",
+    "call me",
     "asesor",
+    "advisor",
     "humano",
+    "human",
     "persona",
+    "person",
+    "talk to someone",
 )
 
-PRICE_INTENT = ("precio", "cuanto", "cuánto", "cost", "vale", "plan", "planes")
-ANGER_INTENT = ("molesto", "estafa", "enojo", "enojado", "reclamo", "queja")
-HOT_STAGE_WORDS = ("interesa", "interesado", "me sirve", "quiero", "listo")
-ECOMMERCE_GENERAL_INTENT = ("ecommerce", "e-commerce", "vender online", "negocio online", "ventas online")
-SHOPIFY_INTENT = ("shopify", "tienda", "checkout", "pagina", "página")
+PRICE_INTENT = ("precio", "cuanto", "cuánto", "cost", "price", "pricing", "how much", "vale", "plan", "planes")
+ANGER_INTENT = ("molesto", "estafa", "enojo", "enojado", "reclamo", "queja", "angry", "scam", "complaint")
+HOT_STAGE_WORDS = ("interesa", "interesado", "me sirve", "quiero", "listo", "ready", "interested", "i want")
+ECOMMERCE_GENERAL_INTENT = (
+    "ecommerce",
+    "e-commerce",
+    "vender online",
+    "negocio online",
+    "ventas online",
+    "sell online",
+    "online store",
+    "online business",
+)
+SHOPIFY_INTENT = ("shopify", "tienda", "store", "checkout", "pagina", "página", "sales")
 META_ADS_INTENT = ("meta ads", "facebook ads", "anuncios", "ads", "pixel", "campaña", "campana")
 DROPSHIPPING_INTENT = ("dropshipping", "drop shipping")
 CHINA_IMPORT_INTENT = ("china", "alibaba", "importar", "proveedor", "proveedores", "muestras", "moq")
-PRODUCT_INTENT = ("producto ganador", "validar producto", "no tengo producto", "que vender", "qué vender", "nicho")
+PRODUCT_INTENT = (
+    "producto ganador",
+    "validar producto",
+    "no tengo producto",
+    "que vender",
+    "qué vender",
+    "nicho",
+    "winning product",
+    "what to sell",
+    "niche",
+)
 BRAND_INTENT = ("marca", "branding", "brand")
 FUNNEL_INTENT = ("embudo", "funnel", "landing", "conversion", "conversión")
-INFO_INTENT = ("mandame info", "mándame info", "informacion", "información", "info")
+INFO_INTENT = ("mandame info", "mándame info", "informacion", "información", "info", "send me info", "information")
+EXPERIENCE_INTENT = (
+    "nuevo",
+    "empezando",
+    "experiencia",
+    "starting",
+    "beginner",
+    "from scratch",
+    "start from zero",
+    "desde cero",
+)
 
 
 @dataclass
@@ -118,7 +160,7 @@ def _detect_intent(message: str) -> str:
         return "info_request"
     if any(word in text for word in ECOMMERCE_GENERAL_INTENT):
         return "ecommerce_general"
-    if "nuevo" in text or "empezando" in text or "experiencia" in text:
+    if any(word in text for word in EXPERIENCE_INTENT):
         return "experience_question"
     if any(word in text for word in HOT_STAGE_WORDS):
         return "interested"
@@ -199,7 +241,7 @@ class ClubCommerceSellerAgent:
             return AgentReply(
                 message=(
                     "Claro. Estas son las ofertas que tengo disponibles:\n"
-                    f"{_format_products(products)}\n\n"
+                    f"{_format_products(products)}\n"
                     "Cual te interesa revisar primero?"
                 ),
                 lead=lead,

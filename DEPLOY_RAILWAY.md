@@ -37,6 +37,9 @@ CRM_API_KEY=secret_del_crm_bridge
 
 ANTHROPIC_API_KEY=sk-ant...
 ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+AI_QUALIFICATION_MIN_SCORE=70
+AI_QUALIFICATION_TEMPLATE=hello_world
+AI_QUALIFICATION_LANGUAGE=es
 
 WHATSAPP_PROVIDER=mock
 META_ACCESS_TOKEN=
@@ -108,4 +111,3 @@ Debe responder:
 ```text
 challenge-ok
 ```
-

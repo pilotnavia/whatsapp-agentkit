@@ -30,6 +30,7 @@ class Settings:
     agent_api_key: str
     ai_qualification_min_score: int
     ai_qualification_template: str
+    ai_qualification_language: str
 
     @property
     def crm_ready(self) -> bool:
@@ -79,4 +80,5 @@ def load_settings() -> Settings:
         agent_api_key=_env("AGENT_API_KEY"),
         ai_qualification_min_score=ai_qualification_min_score,
         ai_qualification_template=_env("AI_QUALIFICATION_TEMPLATE", "hello_world"),
+        ai_qualification_language=_env("AI_QUALIFICATION_LANGUAGE", "es"),
     )

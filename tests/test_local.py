@@ -118,6 +118,7 @@ class FakeAnthropic:
     ready = True
 
     def complete(self, system: str, messages: list[dict[str, str]], max_tokens: int = 900) -> str:
+        assert "SIEMPRE en espanol" in system
         last = messages[-1]["content"].casefold()
         if "shopify" in last:
             assert "Conocimiento base permitido" in system
@@ -129,7 +130,7 @@ class FakeAnthropic:
             )
         if "comprar" in last or "link" in last:
             return (
-                '{"reply":"Perfecto, te conecto con un closer del equipo para avanzar con el pago.",'
+                '{"reply":"Perfecto, te conecto con un asesor del equipo para avanzar con el pago.",'
                 '"intent":"ready_for_handoff","handoff":true,"needsFollowUp":false,'
                 '"followUpNote":"Handoff por intencion fuerte","followUpMinutes":15,"stage":"interesado",'
                 '"handoffReason":"Lead pidio link de pago","handoffTrigger":"payment",'
@@ -153,6 +154,18 @@ class FakeAnthropic:
             '{"reply":"Claro, te ayudo. Ya tienes tienda online o estas empezando desde cero?",'
             '"intent":"discovery","handoff":false,"needsFollowUp":true,'
             '"followUpNote":"Calificar lead nuevo","followUpMinutes":1440,"stage":"conversacion"}'
+        )
+
+
+class FakeAnthropicEnglish:
+    ready = True
+
+    def complete(self, system: str, messages: list[dict[str, str]], max_tokens: int = 900) -> str:
+        assert "SIEMPRE en espanol" in system
+        return (
+            '{"reply":"Sure, I can help you. Do you already have an online store?",'
+            '"intent":"shopify_question","handoff":false,"needsFollowUp":true,'
+            '"followUpNote":"Bad English reply","followUpMinutes":1440,"stage":"conversacion"}'
         )
 
 
@@ -241,6 +254,36 @@ def sample_meta_payload(with_messages: bool = True, message_id: str = "wamid.tes
     }
 
 
+def assert_spanish_customer_reply(message: str) -> None:
+    lowered = message.casefold()
+    forbidden = (
+        "how can i",
+        "i can help",
+        "what is your",
+        "do you have",
+        "let me",
+        "sure,",
+        "would you",
+    )
+    assert not any(marker in lowered for marker in forbidden), message
+    assert any(
+        marker in lowered
+        for marker in (
+            "tienda",
+            "producto",
+            "presupuesto",
+            "equipo",
+            "asesor",
+            "ayudo",
+            "programa",
+            "ofertas",
+            "claro",
+            "perfecto",
+        )
+    ), message
+    assert len(message.splitlines()) <= 5, message
+
+
 def test_w2_fallback_agent() -> None:
     fake = FakeCRMClient()
     agent = ClubCommerceSellerAgent(CRMSalesTools(fake))
@@ -273,7 +316,7 @@ def test_w12_ecommerce_playbook_fallback() -> None:
         ("Quiero importar desde China con proveedores", "china_import_question", "China"),
         ("No tengo producto ganador todavia", "product_validation", "producto"),
         ("Tengo presupuesto de $1000 para iniciar", "budget_capture", "presupuesto"),
-        ("Mandame info del programa", "info_request", "closer"),
+        ("Mandame info del programa", "info_request", "asesor"),
         ("Quiero hablar con alguien humano", "ready_for_handoff", "equipo"),
     ]
 
@@ -314,6 +357,47 @@ def test_w12_ecommerce_playbook_fallback() -> None:
     print("W12 ecommerce playbook fallback OK")
 
 
+def test_w18a_spanish_only_fallback_agent() -> None:
+    fake = FakeCRMClient()
+    agent = ClubCommerceSellerAgent(CRMSalesTools(fake))
+
+    english_shopify = agent.handle_message(
+        "+1 (786) 555-0100",
+        "Hi, I want to start an online store with Shopify",
+        "English Lead",
+    )
+    assert english_shopify.intent == "shopify_question"
+    assert_spanish_customer_reply(english_shopify.message)
+
+    english_price = agent.handle_message(
+        "+1 (786) 555-0100",
+        "How much is the program?",
+        "English Lead",
+    )
+    assert english_price.intent == "pricing"
+    assert "100X Academy" in english_price.message
+    assert_spanish_customer_reply(english_price.message)
+
+    english_handoff = agent.handle_message(
+        "+1 (786) 555-0100",
+        "I want to talk to a human",
+        "English Lead",
+    )
+    assert english_handoff.handoff is True
+    assert english_handoff.intent == "ready_for_handoff"
+    assert_spanish_customer_reply(english_handoff.message)
+
+    english_beginner = agent.handle_message(
+        "+1 (786) 555-0100",
+        "I am starting from scratch with dropshipping",
+        "English Lead",
+    )
+    assert english_beginner.intent in {"dropshipping_question", "experience_question"}
+    assert_spanish_customer_reply(english_beginner.message)
+
+    print("W18A Spanish-only fallback responses OK")
+
+
 def test_w3_claude_brain() -> None:
     fake = FakeCRMClient()
     tools = CRMSalesTools(fake)
@@ -350,6 +434,25 @@ def test_w3_claude_brain() -> None:
 
     print("W3 Claude brain simulation OK")
     print(f"Brain handoff reply: {handoff.message}")
+
+
+def test_w18a_claude_english_reply_falls_back_to_spanish() -> None:
+    fake = FakeCRMClient()
+    tools = CRMSalesTools(fake)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        memory = ConversationMemory(str(pathlib.Path(temp_dir) / "memory.json"))
+        brain = ClaudeSalesBrain(tools, memory, FakeAnthropicEnglish())
+
+        reply = brain.handle_message(
+            "+1 (786) 555-0100",
+            "Can you help me with Shopify?",
+            "English Lead",
+        )
+        assert reply.intent == "shopify_question"
+        assert_spanish_customer_reply(reply.message)
+        assert "Sure" not in reply.message
+
+    print("W18A Claude English guardrail fallback OK")
 
 
 def test_w4_mock_provider() -> None:
@@ -701,7 +804,9 @@ def test_w13_oversized_message_is_ignored() -> None:
 def main() -> None:
     test_w2_fallback_agent()
     test_w12_ecommerce_playbook_fallback()
+    test_w18a_spanish_only_fallback_agent()
     test_w3_claude_brain()
+    test_w18a_claude_english_reply_falls_back_to_spanish()
     test_w4_mock_provider()
     test_w4_meta_provider_parse()
     test_w14_template_provider_foundation()

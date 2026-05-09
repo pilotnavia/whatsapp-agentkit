@@ -15,6 +15,9 @@ CRM_API_KEY=secret_del_crm_bridge
 
 ANTHROPIC_API_KEY=sk-ant...
 ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+AI_QUALIFICATION_MIN_SCORE=70
+AI_QUALIFICATION_TEMPLATE=hello_world
+AI_QUALIFICATION_LANGUAGE=es
 
 WHATSAPP_PROVIDER=meta
 META_ACCESS_TOKEN=token_de_whatsapp_cloud_api
@@ -190,4 +193,3 @@ python3 scripts/smoke_test.py --local
 - Confirmar que el bot responde sin inventar precios.
 - Confirmar handoff humano.
 - Confirmar que `.env`, memoria y logs no estan versionados.
-

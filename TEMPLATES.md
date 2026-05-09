@@ -35,6 +35,16 @@ No uses templates para spam ni campañas masivas sin estrategia, aprobaciones y 
    - Variables si aplica, por ejemplo `{{1}}`.
 7. Envia a revision.
 
+## Idioma para produccion
+
+El agente responde al cliente siempre en espanol. Para el primer contacto automatico tambien usa un template aprobado en espanol:
+
+```bash
+AI_QUALIFICATION_LANGUAGE=es
+```
+
+Si Meta exige un codigo regional especifico en tu cuenta, usa el idioma exacto aprobado para el template, por ejemplo `es_LA` o `es_US`. Lo importante es que `AI_QUALIFICATION_TEMPLATE` exista aprobado en ese idioma.
+
 ## Esperar aprobación
 
 - Meta puede aprobar, rechazar o pedir cambios.
@@ -53,6 +63,8 @@ Meta incluye un template de prueba común:
   "components": []
 }
 ```
+
+`hello_world` sirve para pruebas tecnicas. Para produccion crea un template propio en espanol y configura `AI_QUALIFICATION_TEMPLATE` + `AI_QUALIFICATION_LANGUAGE` con los valores aprobados por Meta.
 
 Endpoint:
 

@@ -70,8 +70,9 @@ class SendTemplatePayload(BaseModel):
     components: list[dict[str, Any]] = Field(default_factory=list)
 
 
-def require_agent_api_key(api_key: str | None) -> None:
+def require_agent_api_key(api_key: str | None, route: str = "agent api") -> None:
     if not agent_api_key_valid(api_key, settings.agent_api_key):
+        logger.warning("%s unauthorized: invalid or missing agent api key", route)
         raise HTTPException(status_code=401, detail="Invalid agent API key")
 
 
@@ -171,7 +172,7 @@ def webhook_mock(payload: SimulateMessage) -> dict[str, Any]:
 
 @app.post("/api/send-message")
 def send_message(payload: SendMessagePayload, x_agent_api_key: str | None = Header(default=None)) -> dict[str, Any]:
-    require_agent_api_key(x_agent_api_key)
+    require_agent_api_key(x_agent_api_key, "send-message")
     if settings.whatsapp_provider != "meta" or getattr(whatsapp_provider, "name", "") != "meta":
         raise HTTPException(status_code=409, detail="WhatsApp real send requires WHATSAPP_PROVIDER=meta")
 
@@ -197,9 +198,7 @@ def send_message(payload: SendMessagePayload, x_agent_api_key: str | None = Head
 
 @app.post("/api/send-template")
 def send_template(payload: SendTemplatePayload, x_agent_api_key: str | None = Header(default=None)) -> dict[str, Any]:
-    require_agent_api_key(x_agent_api_key)
-    if settings.whatsapp_provider != "meta" or getattr(whatsapp_provider, "name", "") != "meta":
-        raise HTTPException(status_code=409, detail="WhatsApp template send requires WHATSAPP_PROVIDER=meta")
+    require_agent_api_key(x_agent_api_key, "send-template")
 
     logger.info(
         "POST /api/send-template provider=%s phone=%s template=%s",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -58,15 +59,51 @@ class MetaWhatsAppProvider:
                 raw = resp.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise WhatsAppProviderError(f"Meta send failed: HTTP {exc.code} {detail}") from exc
+            raise self._provider_error_from_http(exc.code, detail) from exc
         except urllib.error.URLError as exc:
-            raise WhatsAppProviderError(f"Meta unavailable: {exc.reason}") from exc
+            raise WhatsAppProviderError(
+                "Meta unavailable",
+                provider_message=f"Meta unavailable: {exc.reason}",
+                provider_details=str(exc.reason),
+            ) from exc
 
         try:
             data = json.loads(raw or "{}")
         except json.JSONDecodeError as exc:
-            raise WhatsAppProviderError("Meta returned invalid JSON") from exc
+            raise WhatsAppProviderError("Meta returned invalid JSON", provider_details=raw[:500]) from exc
         return {"ok": True, "provider": self.name, "response": data}
+
+    def _provider_error_from_http(self, status: int, detail: str) -> WhatsAppProviderError:
+        parsed: dict[str, Any] = {}
+        try:
+            parsed = json.loads(detail or "{}")
+        except json.JSONDecodeError:
+            parsed = {}
+        error = parsed.get("error") if isinstance(parsed, dict) else {}
+        error = error if isinstance(error, dict) else {}
+        error_data = error.get("error_data") if isinstance(error.get("error_data"), dict) else {}
+        details = self._safe_error_text(str(error_data.get("details") or error.get("error_user_msg") or detail))
+        message = self._safe_error_text(str(error.get("message") or f"Meta send failed with HTTP {status}"))
+        return WhatsAppProviderError(
+            "Meta send failed",
+            provider_status=status,
+            provider_code=error.get("code"),
+            provider_subcode=error.get("error_subcode"),
+            provider_message=message,
+            provider_details=str(details or "")[:1000],
+            fbtrace_id=str(error.get("fbtrace_id") or ""),
+        )
+
+    def _safe_error_text(self, value: str) -> str:
+        text = value.replace(self.access_token, "[redacted]") if self.access_token else value
+        if self.phone_number_id:
+            text = text.replace(self.phone_number_id, "[phone-number-id]")
+        return re.sub(r"\+?\d[\d\s().-]{6,}\d", self._mask_number_match, text)
+
+    @staticmethod
+    def _mask_number_match(match: re.Match[str]) -> str:
+        digits = re.sub(r"\D", "", match.group(0))
+        return f"***{digits[-4:]}"
 
     def build_text_payload(self, phone: str, text: str) -> dict[str, Any]:
         return {

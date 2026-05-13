@@ -584,6 +584,35 @@ def test_w14_template_provider_foundation() -> None:
     print("W14 template provider foundation OK")
 
 
+def test_meta_provider_error_serializes_safely() -> None:
+    meta = MetaWhatsAppProvider(
+        access_token="secret-token-not-for-logs",
+        phone_number_id="123456",
+        verify_token="meta-verify",
+    )
+    detail = json.dumps({
+        "error": {
+            "message": "(#132001) Template name does not exist in the translation",
+            "type": "OAuthException",
+            "code": 132001,
+            "error_subcode": 2494015,
+            "error_data": {"details": "template not found for language es"},
+            "fbtrace_id": "TRACE123",
+        }
+    })
+    error = meta._provider_error_from_http(400, detail)
+    payload = error.safe_payload()
+    assert payload["providerStatus"] == 400
+    assert payload["providerCode"] == "132001"
+    assert payload["providerSubcode"] == "2494015"
+    assert "Template name" in payload["providerMessage"]
+    assert payload["providerDetails"] == "template not found for language es"
+    assert payload["fbtraceId"] == "TRACE123"
+    assert "secret-token-not-for-logs" not in json.dumps(payload)
+
+    print("W18G Meta provider safe error serialization OK")
+
+
 def test_w5_meta_signature_security() -> None:
     body = b'{"entry":[{"changes":[{"value":{"messages":[]}}]}]}'
     secret = "app-secret-for-test"
@@ -810,6 +839,7 @@ def main() -> None:
     test_w4_mock_provider()
     test_w4_meta_provider_parse()
     test_w14_template_provider_foundation()
+    test_meta_provider_error_serializes_safely()
     test_w5_meta_signature_security()
     test_webhook_missing_signature_is_401()
     test_webhook_without_messages_is_ignored()

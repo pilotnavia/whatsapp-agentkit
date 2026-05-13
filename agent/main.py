@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import PlainTextResponse
+from starlette.responses import JSONResponse
 
 from .api_auth import agent_api_key_valid
 from .anthropic_client import AnthropicClient
@@ -76,6 +77,55 @@ def require_agent_api_key(api_key: str | None, route: str = "agent api") -> None
         raise HTTPException(status_code=401, detail="Invalid agent API key")
 
 
+def provider_error_hint(exc: WhatsAppProviderError) -> str:
+    text = " ".join([
+        str(exc.provider_message or ""),
+        str(exc.provider_details or ""),
+        str(exc.provider_code or ""),
+        str(exc.provider_subcode or ""),
+    ]).lower()
+    if "template" in text:
+        return "Revisa que el template exista, este aprobado y tenga el idioma configurado."
+    if "access token" in text or "token" in text or "oauth" in text:
+        return "Revisa META_ACCESS_TOKEN."
+    if "phone number" in text or "phone_number" in text or "recipient" in text:
+        return "Revisa META_PHONE_NUMBER_ID o numero receptor permitido."
+    if "allowed" in text or "allow list" in text or "test" in text:
+        return "Agrega el recipient al test list o usa numero real en produccion."
+    return "Revisa la configuracion de Meta WhatsApp y los permisos del numero."
+
+
+def safe_provider_error(exc: WhatsAppProviderError) -> dict[str, Any]:
+    payload = exc.safe_payload()
+    return {
+        "ok": False,
+        "error": "meta_send_failed",
+        "providerStatus": payload.get("providerStatus"),
+        "providerCode": payload.get("providerCode") or "",
+        "providerSubcode": payload.get("providerSubcode") or "",
+        "providerMessage": payload.get("providerMessage") or "Meta WhatsApp send failed",
+        "providerDetails": payload.get("providerDetails") or "",
+        "fbtraceId": payload.get("fbtraceId") or "",
+        "hint": provider_error_hint(exc),
+    }
+
+
+def log_provider_error(prefix: str, exc: WhatsAppProviderError, *, phone: str = "", template: str = "") -> None:
+    payload = safe_provider_error(exc)
+    logger.warning(
+        "%s phone=%s template=%s metaStatus=%s metaCode=%s metaSubcode=%s metaMessage=%s metaDetails=%s fbtrace_id=%s",
+        prefix,
+        mask_phone(phone),
+        template,
+        payload.get("providerStatus") or "",
+        payload.get("providerCode") or "",
+        payload.get("providerSubcode") or "",
+        payload.get("providerMessage") or "",
+        payload.get("providerDetails") or "",
+        payload.get("fbtraceId") or "",
+    )
+
+
 @app.get("/")
 def root() -> dict[str, Any]:
     return {
@@ -116,6 +166,7 @@ def debug_config() -> dict[str, Any]:
         ),
         "graphVersion": settings.meta_graph_version,
         "qualificationMinScore": settings.ai_qualification_min_score,
+        "aiQualificationTemplate": settings.ai_qualification_template,
         "qualificationLanguage": settings.ai_qualification_language,
     }
 
@@ -134,6 +185,10 @@ def debug_status() -> dict[str, Any]:
             and settings.meta_verify_token
             and settings.meta_app_secret
         ),
+        "phoneNumberIdConfigured": bool(settings.meta_phone_number_id),
+        "agentApiKeyConfigured": bool(settings.agent_api_key),
+        "graphVersion": settings.meta_graph_version,
+        "aiQualificationTemplate": settings.ai_qualification_template,
         "memoryPath": settings.memory_path,
         "qualificationMinScore": settings.ai_qualification_min_score,
         "qualificationLanguage": settings.ai_qualification_language,
@@ -185,8 +240,9 @@ def send_message(payload: SendMessagePayload, x_agent_api_key: str | None = Head
     try:
         result = whatsapp_provider.send_message(payload.phone, payload.message.strip())
     except WhatsAppProviderError as exc:
-        logger.warning("Manual WhatsApp send failed phone=%s error=%s", mask_phone(payload.phone), type(exc).__name__)
-        raise HTTPException(status_code=502, detail="WhatsApp provider send failed") from exc
+        error_payload = safe_provider_error(exc)
+        log_provider_error("Manual WhatsApp send failed", exc, phone=payload.phone)
+        return JSONResponse(status_code=502, content=error_payload)
 
     response = result.get("response") if isinstance(result, dict) else {}
     messages = response.get("messages") if isinstance(response, dict) else []
@@ -214,13 +270,9 @@ def send_template(payload: SendTemplatePayload, x_agent_api_key: str | None = He
             payload.components,
         )
     except WhatsAppProviderError as exc:
-        logger.warning(
-            "WhatsApp template send failed phone=%s template=%s error=%s",
-            mask_phone(payload.phone),
-            payload.templateName,
-            type(exc).__name__,
-        )
-        raise HTTPException(status_code=502, detail="WhatsApp provider template send failed") from exc
+        error_payload = safe_provider_error(exc)
+        log_provider_error("WhatsApp template send failed", exc, phone=payload.phone, template=payload.templateName)
+        return JSONResponse(status_code=502, content=error_payload)
 
     response = result.get("response") if isinstance(result, dict) else {}
     messages = response.get("messages") if isinstance(response, dict) else []

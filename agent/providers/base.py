@@ -17,7 +17,34 @@ class IncomingMessage:
 
 
 class WhatsAppProviderError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider_status: int | None = None,
+        provider_code: str | int | None = None,
+        provider_subcode: str | int | None = None,
+        provider_message: str | None = None,
+        provider_details: str | None = None,
+        fbtrace_id: str | None = None,
+    ):
+        super().__init__(message)
+        self.provider_status = provider_status
+        self.provider_code = str(provider_code or "") if provider_code is not None else ""
+        self.provider_subcode = str(provider_subcode or "") if provider_subcode is not None else ""
+        self.provider_message = provider_message or message
+        self.provider_details = provider_details or ""
+        self.fbtrace_id = fbtrace_id or ""
+
+    def safe_payload(self) -> dict[str, Any]:
+        return {
+            "providerStatus": self.provider_status,
+            "providerCode": self.provider_code,
+            "providerSubcode": self.provider_subcode,
+            "providerMessage": self.provider_message,
+            "providerDetails": self.provider_details,
+            "fbtraceId": self.fbtrace_id,
+        }
 
 
 class WhatsAppProvider(Protocol):

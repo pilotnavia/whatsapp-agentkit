@@ -47,6 +47,26 @@ class WhatsAppProviderError(RuntimeError):
         }
 
 
+def provider_error_hint(exc: WhatsAppProviderError) -> str:
+    text = " ".join([
+        str(exc.provider_message or ""),
+        str(exc.provider_details or ""),
+        str(exc.provider_code or ""),
+        str(exc.provider_subcode or ""),
+    ]).lower()
+    if str(exc.provider_code or "") == "190" or "authentication error" in text:
+        return "META_ACCESS_TOKEN invalido o expirado. Genera un token nuevo/permanente y redeploy AgentKit."
+    if "template" in text:
+        return "Revisa que el template exista, este aprobado y tenga el idioma configurado."
+    if "access token" in text or "token" in text or "oauth" in text:
+        return "Revisa META_ACCESS_TOKEN."
+    if "phone number" in text or "phone_number" in text or "recipient" in text:
+        return "Revisa META_PHONE_NUMBER_ID o numero receptor permitido."
+    if "allowed" in text or "allow list" in text or "test" in text:
+        return "Agrega el recipient al test list o usa numero real en produccion."
+    return "Revisa la configuracion de Meta WhatsApp y los permisos del numero."
+
+
 class WhatsAppProvider(Protocol):
     name: str
 

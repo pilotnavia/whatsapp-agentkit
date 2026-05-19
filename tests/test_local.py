@@ -17,7 +17,7 @@ from agent.api_auth import agent_api_key_valid
 from agent.brain import ClaudeSalesBrain
 from agent.memory import ConversationMemory
 from agent.providers import MetaWhatsAppProvider, MockWhatsAppProvider
-from agent.providers.base import IncomingMessage, WhatsAppProviderError
+from agent.providers.base import IncomingMessage, WhatsAppProviderError, provider_error_hint
 from agent.security import mask_phone, sign_meta_payload, verify_meta_signature
 from agent.seller_agent import ClubCommerceSellerAgent
 from agent.tools import CRMSalesTools
@@ -613,6 +613,20 @@ def test_meta_provider_error_serializes_safely() -> None:
     print("W18G Meta provider safe error serialization OK")
 
 
+def test_meta_token_error_hint_is_specific() -> None:
+    error = WhatsAppProviderError(
+        "Meta send failed",
+        provider_status=401,
+        provider_code=190,
+        provider_message="Authentication Error",
+    )
+    hint = provider_error_hint(error)
+    assert "META_ACCESS_TOKEN" in hint
+    assert "expirado" in hint
+
+    print("W18H Meta token diagnostic hint OK")
+
+
 def test_w5_meta_signature_security() -> None:
     body = b'{"entry":[{"changes":[{"value":{"messages":[]}}]}]}'
     secret = "app-secret-for-test"
@@ -840,6 +854,7 @@ def main() -> None:
     test_w4_meta_provider_parse()
     test_w14_template_provider_foundation()
     test_meta_provider_error_serializes_safely()
+    test_meta_token_error_hint_is_specific()
     test_w5_meta_signature_security()
     test_webhook_missing_signature_is_401()
     test_webhook_without_messages_is_ignored()

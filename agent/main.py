@@ -23,7 +23,7 @@ from .config import load_settings
 from .crm_client import CRMClient, CRMClientError
 from .memory import ConversationMemory
 from .providers import build_provider
-from .providers.base import WhatsAppProviderError
+from .providers.base import WhatsAppProviderError, provider_error_hint
 from .security import mask_phone
 from .tools import CRMSalesTools
 from .webhook_handler import WebhookHTTPError, process_webhook_body
@@ -75,24 +75,6 @@ def require_agent_api_key(api_key: str | None, route: str = "agent api") -> None
     if not agent_api_key_valid(api_key, settings.agent_api_key):
         logger.warning("%s unauthorized: invalid or missing agent api key", route)
         raise HTTPException(status_code=401, detail="Invalid agent API key")
-
-
-def provider_error_hint(exc: WhatsAppProviderError) -> str:
-    text = " ".join([
-        str(exc.provider_message or ""),
-        str(exc.provider_details or ""),
-        str(exc.provider_code or ""),
-        str(exc.provider_subcode or ""),
-    ]).lower()
-    if "template" in text:
-        return "Revisa que el template exista, este aprobado y tenga el idioma configurado."
-    if "access token" in text or "token" in text or "oauth" in text:
-        return "Revisa META_ACCESS_TOKEN."
-    if "phone number" in text or "phone_number" in text or "recipient" in text:
-        return "Revisa META_PHONE_NUMBER_ID o numero receptor permitido."
-    if "allowed" in text or "allow list" in text or "test" in text:
-        return "Agrega el recipient al test list o usa numero real en produccion."
-    return "Revisa la configuracion de Meta WhatsApp y los permisos del numero."
 
 
 def safe_provider_error(exc: WhatsAppProviderError) -> dict[str, Any]:
@@ -185,6 +167,7 @@ def debug_status() -> dict[str, Any]:
             and settings.meta_verify_token
             and settings.meta_app_secret
         ),
+        "tokenConfigured": bool(settings.meta_access_token),
         "phoneNumberIdConfigured": bool(settings.meta_phone_number_id),
         "agentApiKeyConfigured": bool(settings.agent_api_key),
         "graphVersion": settings.meta_graph_version,

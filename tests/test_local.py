@@ -113,6 +113,19 @@ class FakeCRMClient:
             ],
         }
 
+    def get_agent_tools(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "tools": [
+                {"key": "propose_sales_action", "status": "enabled"},
+                {"key": "request_handoff", "status": "enabled"},
+                {"key": "create_followup_task", "status": "enabled"},
+                {"key": "enqueue_template", "status": "enabled"},
+                {"key": "enroll_sequence", "status": "enabled"},
+                {"key": "update_lead_safe_fields", "status": "enabled"},
+            ],
+        }
+
 
 class FakeAnthropic:
     ready = True

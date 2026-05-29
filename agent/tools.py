@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
@@ -43,6 +44,10 @@ class CRMClientProtocol(Protocol):
     ) -> dict[str, Any]: ...
     def submit_qualification(self, lead_id: str, payload: dict[str, Any]) -> dict[str, Any]: ...
     def get_products(self) -> dict[str, Any]: ...
+    def get_training_context(self) -> dict[str, Any]: ...
+    def get_whatsapp_automation(self) -> dict[str, Any]: ...
+    def get_agent_tools(self) -> dict[str, Any]: ...
+    def create_sales_action(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
 
 def normalize_phone(value: str | None) -> str:
@@ -256,6 +261,54 @@ def ai_qualification_from_message(
 class CRMSalesTools:
     def __init__(self, crm: CRMClientProtocol):
         self.crm = crm
+        self._training_context_cache: dict[str, Any] | None = None
+        self._training_context_cache_at = 0.0
+        self._whatsapp_automation_cache: dict[str, Any] | None = None
+        self._whatsapp_automation_cache_at = 0.0
+        self._agent_tools_cache: dict[str, Any] | None = None
+        self._agent_tools_cache_at = 0.0
+        self.training_context_ttl_seconds = 60
+
+    def get_agent_tools(self, force: bool = False) -> dict[str, Any]:
+        if not hasattr(self.crm, "get_agent_tools"):
+            return self._agent_tools_cache or {}
+        now = time.time()
+        if (
+            not force
+            and self._agent_tools_cache is not None
+            and now - self._agent_tools_cache_at < self.training_context_ttl_seconds
+        ):
+            return self._agent_tools_cache
+        try:
+            response = self.crm.get_agent_tools()
+            tools = response.get("tools", []) if isinstance(response, dict) else []
+            context = {"tools": tools if isinstance(tools, list) else []}
+            self._agent_tools_cache = context
+            self._agent_tools_cache_at = now
+            return context
+        except Exception as exc:
+            logger.warning("CRM agent tools unavailable error=%s", type(exc).__name__)
+            return self._agent_tools_cache or {}
+
+    def tool_enabled(self, key: str) -> bool:
+        context = self.get_agent_tools()
+        tools = context.get("tools") if isinstance(context, dict) else None
+        if not isinstance(tools, list) or not tools:
+            return True
+        match = next((tool for tool in tools if isinstance(tool, dict) and tool.get("key") == key), None)
+        return not match or match.get("status") == "enabled"
+
+    @staticmethod
+    def _tool_for_sales_action(action_type: str) -> str:
+        return {
+            "send_template": "enqueue_template",
+            "create_followup": "create_followup_task",
+            "request_handoff": "request_handoff",
+            "update_lead": "update_lead_safe_fields",
+            "enroll_sequence": "enroll_sequence",
+            "pause_bot": "pause_bot",
+            "suggest_reply": "summarize_conversation",
+        }.get(action_type, "")
 
     def lookup_lead(self, phone: str | None = None, email: str | None = None) -> dict[str, Any]:
         return self.crm.lookup_lead(phone=normalize_phone(phone), email=email)
@@ -318,6 +371,8 @@ class CRMSalesTools:
         minutes_from_now: int = 1440,
         followup_type: str = "whatsapp",
     ) -> dict[str, Any]:
+        if not self.tool_enabled("create_followup_task"):
+            return {"ok": False, "skipped": True, "reason": "agent_tool_disabled:create_followup_task"}
         try:
             response = self.crm.create_followup(
                 lead_id=lead_id,
@@ -353,6 +408,8 @@ class CRMSalesTools:
         recommended_next_step: str = "",
         confidence: str = "medium",
     ) -> dict[str, Any]:
+        if not self.tool_enabled("request_handoff"):
+            return {"ok": False, "skipped": True, "reason": "agent_tool_disabled:request_handoff"}
         clean_phone = normalize_phone(phone)
         try:
             response = self.crm.request_human_handoff(
@@ -407,3 +464,91 @@ class CRMSalesTools:
         response = self.crm.get_products()
         products = response.get("products", response if isinstance(response, list) else [])
         return products if isinstance(products, list) else []
+
+    def get_training_context(self, force: bool = False) -> dict[str, Any]:
+        if not hasattr(self.crm, "get_training_context"):
+            return self._training_context_cache or {}
+        now = time.time()
+        if (
+            not force
+            and self._training_context_cache is not None
+            and now - self._training_context_cache_at < self.training_context_ttl_seconds
+        ):
+            return self._training_context_cache
+        try:
+            response = self.crm.get_training_context()
+            context = response.get("trainingContext", response if isinstance(response, dict) else {})
+            if not isinstance(context, dict):
+                context = {}
+            self._training_context_cache = context
+            self._training_context_cache_at = now
+            return context
+        except Exception as exc:
+            logger.warning("CRM training context unavailable error=%s", type(exc).__name__)
+            return self._training_context_cache or {}
+
+    def get_whatsapp_automation(self, force: bool = False) -> dict[str, Any]:
+        if not hasattr(self.crm, "get_whatsapp_automation"):
+            return self._whatsapp_automation_cache or {}
+        now = time.time()
+        if (
+            not force
+            and self._whatsapp_automation_cache is not None
+            and now - self._whatsapp_automation_cache_at < self.training_context_ttl_seconds
+        ):
+            return self._whatsapp_automation_cache
+        try:
+            response = self.crm.get_whatsapp_automation()
+            context = response.get("whatsappAutomation", response if isinstance(response, dict) else {})
+            if not isinstance(context, dict):
+                context = {}
+            self._whatsapp_automation_cache = context
+            self._whatsapp_automation_cache_at = now
+            return context
+        except Exception as exc:
+            logger.warning("CRM whatsapp automation unavailable error=%s", type(exc).__name__)
+            return self._whatsapp_automation_cache or {}
+
+    def propose_sales_action(
+        self,
+        lead_id: str | None,
+        phone: str | None,
+        action_type: str,
+        title: str,
+        reasoning: str,
+        priority: str = "medium",
+        recommended_message: str = "",
+        template_id: str = "",
+        sequence_id: str = "",
+        follow_up_at: str = "",
+        lead_patch: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not hasattr(self.crm, "create_sales_action"):
+            return {"skipped": True, "reason": "crm_client_missing_sales_actions"}
+        if not self.tool_enabled("propose_sales_action"):
+            return {"skipped": True, "reason": "agent_tool_disabled:propose_sales_action"}
+        required_tool = self._tool_for_sales_action(action_type)
+        if required_tool and not self.tool_enabled(required_tool):
+            return {"skipped": True, "reason": f"agent_tool_disabled:{required_tool}"}
+        payload = {
+            "leadId": lead_id,
+            "phone": phone,
+            "actionType": action_type,
+            "priority": priority,
+            "title": title,
+            "reasoning": reasoning,
+            "recommendedMessage": recommended_message,
+            "templateId": template_id,
+            "sequenceId": sequence_id,
+            "followUpAt": follow_up_at,
+            "leadPatch": lead_patch or {},
+            "metadata": metadata or {},
+        }
+        try:
+            response = self.crm.create_sales_action(payload)
+            logger.info("CRM sales action proposed lead=%s type=%s ok=%s", lead_id, action_type, bool(response.get("ok", True)))
+            return response
+        except Exception as exc:
+            logger.warning("CRM sales action proposal failed lead=%s type=%s error=%s", lead_id, action_type, type(exc).__name__)
+            return {"skipped": True, "reason": "crm_sales_action_failed"}

@@ -181,6 +181,28 @@ def debug_status() -> dict[str, Any]:
     }
 
 
+@app.get("/debug/automation-context")
+def debug_automation_context() -> dict[str, Any]:
+    """Non-secret CRM context cache status for automation QA."""
+    now = time.time()
+    training_context = sales_tools.get_training_context()
+    automation_context = sales_tools.get_whatsapp_automation()
+    agent_tools_context = sales_tools.get_agent_tools()
+    return {
+        "ok": True,
+        "trainingContextLoaded": bool(training_context),
+        "automationContextLoaded": bool(automation_context),
+        "agentToolsLoaded": bool(agent_tools_context.get("tools")) if isinstance(agent_tools_context, dict) else False,
+        "trainingCacheAge": round(now - getattr(sales_tools, "_training_context_cache_at", 0.0), 2) if getattr(sales_tools, "_training_context_cache_at", 0.0) else None,
+        "automationCacheAge": round(now - getattr(sales_tools, "_whatsapp_automation_cache_at", 0.0), 2) if getattr(sales_tools, "_whatsapp_automation_cache_at", 0.0) else None,
+        "agentToolsCacheAge": round(now - getattr(sales_tools, "_agent_tools_cache_at", 0.0), 2) if getattr(sales_tools, "_agent_tools_cache_at", 0.0) else None,
+        "activeProductsCount": len(training_context.get("activeProducts", [])) if isinstance(training_context, dict) else 0,
+        "templatesCount": len(automation_context.get("templates", [])) if isinstance(automation_context, dict) else 0,
+        "sequencesCount": len(automation_context.get("sequences", [])) if isinstance(automation_context, dict) else 0,
+        "agentToolsCount": len(agent_tools_context.get("tools", [])) if isinstance(agent_tools_context, dict) else 0,
+    }
+
+
 @app.post("/simulate")
 def simulate(payload: SimulateMessage) -> dict[str, Any]:
     try:

@@ -144,3 +144,15 @@ class CRMClient:
 
     def get_products(self) -> dict[str, Any]:
         return self._request("GET", "/api/agent/products")
+
+    def get_training_context(self) -> dict[str, Any]:
+        return self._request("GET", "/api/agent/training-context")
+
+    def get_whatsapp_automation(self) -> dict[str, Any]:
+        return self._request("GET", "/api/agent/whatsapp-automation")
+
+    def get_agent_tools(self) -> dict[str, Any]:
+        return self._request("GET", "/api/agent/tools")
+
+    def create_sales_action(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/api/agent/sales-actions", payload=payload)

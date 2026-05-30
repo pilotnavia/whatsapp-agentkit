@@ -1,20 +1,29 @@
 # WhatsApp Web Session Provider
 
-AgentKit can now use the experimental `web_session` provider through the `whatsapp-web-bridge` sidecar.
+AgentKit can use the experimental `web_session` provider through the `whatsapp-web-bridge` sidecar. This lets the CRM connect existing WhatsApp / WhatsApp Business numbers by QR while AgentKit keeps the same send-message, send-template, inbound webhook, training-context, and human-takeover behavior.
 
-Meta Cloud API remains the recommended production provider. `web_session` is unofficial and should be treated as risky/experimental.
+Meta Cloud API remains available and is still the official provider. `web_session` is unofficial and should be treated as experimental. Use it for existing warm numbers, internal seller lines, or controlled agency operations, never for bulk outreach.
 
 ## Environment
 
 ```bash
 WHATSAPP_PROVIDER=web_session
-WEB_SESSION_BRIDGE_URL=http://127.0.0.1:3100
+WEB_SESSION_BRIDGE_URL=https://wa-bridge.yourdomain.com
 WEB_SESSION_BRIDGE_API_KEY=change_me_bridge_key
 WEB_SESSION_DEFAULT_SESSION_ID=closer_1
 AGENT_API_KEY=change_me_agent_key
 ```
 
-For deployed services, `WEB_SESSION_BRIDGE_URL` must be reachable from AgentKit. If AgentKit runs on Render and the bridge runs locally, `http://localhost:3100` points to the AgentKit container, not your computer. Deploy the bridge publicly or use a secure tunnel.
+For deployed services, `WEB_SESSION_BRIDGE_URL` must be reachable from AgentKit. If AgentKit runs on Render and the bridge runs locally, `http://localhost:3100` points to the AgentKit container, not your computer. Use a permanent Cloudflare Tunnel or deploy the bridge on a VPS.
+
+## Supported Bridge Modes
+
+| Mode | Recommended for | AgentKit requirement |
+| --- | --- | --- |
+| Local Bridge + Cloudflare Tunnel | Internal ClubCommerce use, small teams, 1-5 lines | `WEB_SESSION_BRIDGE_URL=https://wa-bridge.yourdomain.com` from the tunnel route |
+| VPS Bridge + Docker | Clients, agencies, larger teams, production-style uptime | `WEB_SESSION_BRIDGE_URL=https://wa-bridge.yourdomain.com` from the VPS reverse proxy |
+
+AgentKit does not need to know where the bridge is hosted. It only needs the public bridge URL and API key.
 
 Local run example:
 
@@ -53,3 +62,5 @@ Authorization: Bearer AGENT_API_KEY
 - Official template status, template approval, and Meta billing do not apply to web sessions.
 - Use low-volume controlled tests only.
 - Keep opt-out, quiet hours, CRM queue limits, and human takeover enabled.
+- Generate bridge keys with `openssl rand -hex 32`.
+- Never commit `.env` files or log API keys.

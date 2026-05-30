@@ -13,3 +13,7 @@ venv/
 dist/
 build/
 .DS_Store
+*.swp
+*.swo
+.*.swp
+.*.swo

@@ -67,7 +67,7 @@ Useful local endpoints:
 
 ## Experimental WhatsApp Web Provider
 
-For controlled tests only:
+For controlled tests and existing seller lines only. Meta Cloud API remains available and is the official WhatsApp provider.
 
 ```bash
 WHATSAPP_PROVIDER=web_session
@@ -76,7 +76,14 @@ WEB_SESSION_BRIDGE_API_KEY=...
 WEB_SESSION_DEFAULT_SESSION_ID=closer_1
 ```
 
-Start/deploy the separate `whatsapp-web-bridge` service first, then create and scan the session QR from CRM Settings > WhatsApp Providers.
+Start/deploy the separate `whatsapp-web-bridge` service first, then create and scan the session QR from CRM `WhatsApp > Web Lines / QR`.
+
+Supported bridge deployment modes:
+
+| Mode | Use when | Notes |
+| --- | --- | --- |
+| Local Bridge + Cloudflare Tunnel | Internal ClubCommerce, small teams, dedicated computer | The local computer must stay awake and the Cloudflare Tunnel must remain online |
+| VPS Bridge + Docker | Clients, agencies, remote teams, production-like uptime | Use persistent session storage, a domain, HTTPS reverse proxy, and firewall |
 
 `web_session` sends rendered text through WhatsApp Web. It is not the official Meta Cloud API and should not be used for bulk outreach.
 

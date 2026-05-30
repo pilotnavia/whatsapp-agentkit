@@ -8,7 +8,7 @@ AgentKit is the WhatsApp/AI transport service. The CRM remains the source of tru
 - `CRM_API_URL`
 - `CRM_API_KEY`
 - `AGENT_API_KEY`
-- `WHATSAPP_PROVIDER=mock|meta`
+- `WHATSAPP_PROVIDER=mock|meta|web_session`
 - `MEMORY_PATH`
 
 For Claude:
@@ -64,6 +64,21 @@ Useful local endpoints:
 - Build command: `pip install -r requirements.txt`
 - Start command: `uvicorn agent.main:app --host 0.0.0.0 --port $PORT`
 - Health check path: `/readiness`
+
+## Experimental WhatsApp Web Provider
+
+For controlled tests only:
+
+```bash
+WHATSAPP_PROVIDER=web_session
+WEB_SESSION_BRIDGE_URL=https://your-bridge.example.com
+WEB_SESSION_BRIDGE_API_KEY=...
+WEB_SESSION_DEFAULT_SESSION_ID=closer_1
+```
+
+Start/deploy the separate `whatsapp-web-bridge` service first, then create and scan the session QR from CRM Settings > WhatsApp Providers.
+
+`web_session` sends rendered text through WhatsApp Web. It is not the official Meta Cloud API and should not be used for bulk outreach.
 
 `Procfile` and `Dockerfile` already use the same start command.
 

@@ -62,6 +62,7 @@ class SendMessagePayload(BaseModel):
     phone: str = Field(..., min_length=5)
     message: str = Field(..., min_length=1, max_length=1500)
     leadId: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SendTemplatePayload(BaseModel):
@@ -69,6 +70,8 @@ class SendTemplatePayload(BaseModel):
     templateName: str = Field(..., min_length=1, max_length=120)
     languageCode: str = Field(default="en_US", min_length=2, max_length=20)
     components: list[dict[str, Any]] = Field(default_factory=list)
+    renderedBody: str | None = Field(default=None, max_length=1500)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def require_agent_api_key(api_key: str | None, route: str = "agent api") -> None:
@@ -81,7 +84,7 @@ def safe_provider_error(exc: WhatsAppProviderError) -> dict[str, Any]:
     payload = exc.safe_payload()
     return {
         "ok": False,
-        "error": "meta_send_failed",
+        "error": "provider_send_failed",
         "providerStatus": payload.get("providerStatus"),
         "providerCode": payload.get("providerCode") or "",
         "providerSubcode": payload.get("providerSubcode") or "",
@@ -129,6 +132,8 @@ def health() -> dict[str, Any]:
         "model": settings.anthropic_model if anthropic_client.ready else "fallback-local",
         "qualificationMinScore": settings.ai_qualification_min_score,
         "qualificationLanguage": settings.ai_qualification_language,
+        "webSessionBridgeConfigured": bool(settings.web_session_bridge_url and settings.web_session_bridge_api_key),
+        "webSessionDefaultSessionConfigured": bool(settings.web_session_default_session_id),
     }
 
 
@@ -156,6 +161,8 @@ def readiness() -> dict[str, Any]:
         warnings.append("CRM_API_URL or CRM_API_KEY missing")
     if provider == "meta" and not meta_configured:
         warnings.append("Meta provider selected but one or more Meta env vars are missing")
+    if provider == "web_session" and not settings.whatsapp_ready:
+        warnings.append("web_session provider selected but bridge URL/API key/default session is missing")
     if not settings.agent_api_key:
         warnings.append("AGENT_API_KEY missing; CRM cannot call send endpoints")
     if not anthropic_client.ready:
@@ -186,6 +193,9 @@ def readiness() -> dict[str, Any]:
         "automationContextReachable": bool(automation_probe.get("ok")),
         "agentToolsReachable": bool(tools_probe.get("ok")),
         "metaConfigured": meta_configured,
+        "webSessionBridgeConfigured": bool(settings.web_session_bridge_url and settings.web_session_bridge_api_key),
+        "webSessionDefaultSessionConfigured": bool(settings.web_session_default_session_id),
+        "webSessionBridgeReachable": bool(getattr(whatsapp_provider, "health", lambda: {"ok": False})().get("ok")) if provider == "web_session" else None,
         "tokenConfigured": bool(settings.meta_access_token),
         "phoneNumberIdConfigured": bool(settings.meta_phone_number_id),
         "verifyTokenConfigured": bool(settings.meta_verify_token),
@@ -217,6 +227,8 @@ def debug_config() -> dict[str, Any]:
         "qualificationMinScore": settings.ai_qualification_min_score,
         "aiQualificationTemplate": settings.ai_qualification_template,
         "qualificationLanguage": settings.ai_qualification_language,
+        "webSessionBridgeConfigured": bool(settings.web_session_bridge_url and settings.web_session_bridge_api_key),
+        "webSessionDefaultSessionConfigured": bool(settings.web_session_default_session_id),
     }
 
 
@@ -242,6 +254,8 @@ def debug_status() -> dict[str, Any]:
         "memoryPath": settings.memory_path,
         "qualificationMinScore": settings.ai_qualification_min_score,
         "qualificationLanguage": settings.ai_qualification_language,
+        "webSessionBridgeConfigured": bool(settings.web_session_bridge_url and settings.web_session_bridge_api_key),
+        "webSessionDefaultSessionConfigured": bool(settings.web_session_default_session_id),
         "uptime": round(time.time() - START_TIME, 2),
         "version": app.version,
         "commit": runtime_commit(),
@@ -300,8 +314,8 @@ def webhook_mock(payload: SimulateMessage) -> dict[str, Any]:
 @app.post("/api/send-message")
 def send_message(payload: SendMessagePayload, x_agent_api_key: str | None = Header(default=None)) -> dict[str, Any]:
     require_agent_api_key(x_agent_api_key, "send-message")
-    if settings.whatsapp_provider != "meta" or getattr(whatsapp_provider, "name", "") != "meta":
-        raise HTTPException(status_code=409, detail="WhatsApp real send requires WHATSAPP_PROVIDER=meta")
+    if getattr(whatsapp_provider, "name", "") not in {"meta", "web_session"}:
+        raise HTTPException(status_code=409, detail="WhatsApp real send requires WHATSAPP_PROVIDER=meta or web_session")
 
     logger.info(
         "POST /api/send-message provider=%s phone=%s lead=%s",
@@ -310,7 +324,10 @@ def send_message(payload: SendMessagePayload, x_agent_api_key: str | None = Head
         payload.leadId or "",
     )
     try:
-        result = whatsapp_provider.send_message(payload.phone, payload.message.strip())
+        if getattr(whatsapp_provider, "name", "") == "web_session":
+            result = whatsapp_provider.send_message(payload.phone, payload.message.strip(), metadata=payload.metadata)
+        else:
+            result = whatsapp_provider.send_message(payload.phone, payload.message.strip())
     except WhatsAppProviderError as exc:
         error_payload = safe_provider_error(exc)
         log_provider_error("Manual WhatsApp send failed", exc, phone=payload.phone)
@@ -319,7 +336,9 @@ def send_message(payload: SendMessagePayload, x_agent_api_key: str | None = Head
     response = result.get("response") if isinstance(result, dict) else {}
     messages = response.get("messages") if isinstance(response, dict) else []
     provider_message_id = ""
-    if isinstance(messages, list) and messages and isinstance(messages[0], dict):
+    if isinstance(result, dict):
+        provider_message_id = str(result.get("providerMessageId") or result.get("messageId") or result.get("id") or "")
+    if not provider_message_id and isinstance(messages, list) and messages and isinstance(messages[0], dict):
         provider_message_id = str(messages[0].get("id") or "")
     return {"ok": True, "providerMessageId": provider_message_id}
 
@@ -335,12 +354,22 @@ def send_template(payload: SendTemplatePayload, x_agent_api_key: str | None = He
         payload.templateName,
     )
     try:
-        result = whatsapp_provider.send_template(
-            payload.phone,
-            payload.templateName.strip(),
-            payload.languageCode.strip() or "en_US",
-            payload.components,
-        )
+        if getattr(whatsapp_provider, "name", "") == "web_session":
+            result = whatsapp_provider.send_template(
+                payload.phone,
+                payload.templateName.strip(),
+                payload.languageCode.strip() or "en_US",
+                payload.components,
+                rendered_body=(payload.renderedBody or "").strip(),
+                metadata=payload.metadata,
+            )
+        else:
+            result = whatsapp_provider.send_template(
+                payload.phone,
+                payload.templateName.strip(),
+                payload.languageCode.strip() or "en_US",
+                payload.components,
+            )
     except WhatsAppProviderError as exc:
         error_payload = safe_provider_error(exc)
         log_provider_error("WhatsApp template send failed", exc, phone=payload.phone, template=payload.templateName)
@@ -349,9 +378,36 @@ def send_template(payload: SendTemplatePayload, x_agent_api_key: str | None = He
     response = result.get("response") if isinstance(result, dict) else {}
     messages = response.get("messages") if isinstance(response, dict) else []
     provider_message_id = ""
-    if isinstance(messages, list) and messages and isinstance(messages[0], dict):
+    if isinstance(result, dict):
+        provider_message_id = str(result.get("providerMessageId") or result.get("messageId") or result.get("id") or "")
+    if not provider_message_id and isinstance(messages, list) and messages and isinstance(messages[0], dict):
         provider_message_id = str(messages[0].get("id") or "")
     return {"ok": True, "providerMessageId": provider_message_id}
+
+
+@app.post("/webhooks/web-session")
+async def receive_web_session_webhook(request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    expected = f"Bearer {settings.agent_api_key}" if settings.agent_api_key else ""
+    if not expected or authorization != expected:
+        logger.warning("web_session webhook unauthorized")
+        raise HTTPException(status_code=401, detail="Invalid AgentKit webhook key")
+    if getattr(whatsapp_provider, "name", "") != "web_session":
+        raise HTTPException(status_code=409, detail="AgentKit is not configured for WHATSAPP_PROVIDER=web_session")
+    try:
+        return await process_webhook_body(
+            await request.body(),
+            None,
+            current_settings=settings,
+            provider=whatsapp_provider,
+            brain=seller_brain,
+        )
+    except WebhookHTTPError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("POST /webhooks/web-session unhandled failure error=%s", type(exc).__name__)
+        return {"ok": True, "accepted": False, "error": "unhandled_web_session_webhook_error"}
 
 
 @app.get("/webhook")

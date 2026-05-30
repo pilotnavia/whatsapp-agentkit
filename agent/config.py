@@ -31,6 +31,9 @@ class Settings:
     ai_qualification_min_score: int
     ai_qualification_template: str
     ai_qualification_language: str
+    web_session_bridge_url: str
+    web_session_bridge_api_key: str
+    web_session_default_session_id: str
 
     @property
     def crm_ready(self) -> bool:
@@ -45,6 +48,8 @@ class Settings:
                 and self.meta_verify_token
                 and self.meta_app_secret
             )
+        if self.whatsapp_provider == "web_session":
+            return bool(self.web_session_bridge_url and self.web_session_bridge_api_key and self.web_session_default_session_id)
         return True
 
 
@@ -81,4 +86,7 @@ def load_settings() -> Settings:
         ai_qualification_min_score=ai_qualification_min_score,
         ai_qualification_template=_env("AI_QUALIFICATION_TEMPLATE", "hello_world"),
         ai_qualification_language=_env("AI_QUALIFICATION_LANGUAGE", "es"),
+        web_session_bridge_url=_env("WEB_SESSION_BRIDGE_URL", "http://127.0.0.1:3100").rstrip("/"),
+        web_session_bridge_api_key=_env("WEB_SESSION_BRIDGE_API_KEY"),
+        web_session_default_session_id=_env("WEB_SESSION_DEFAULT_SESSION_ID"),
     )

@@ -56,6 +56,8 @@ def provider_error_hint(exc: WhatsAppProviderError) -> str:
     ]).lower()
     if str(exc.provider_code or "") == "190" or "authentication error" in text:
         return "META_ACCESS_TOKEN invalido o expirado. Genera un token nuevo/permanente y redeploy AgentKit."
+    if "web_session" in text or "bridge" in text:
+        return "Revisa WEB_SESSION_BRIDGE_URL, WEB_SESSION_BRIDGE_API_KEY y que la sesion WhatsApp Web este conectada."
     if "template" in text:
         return "Revisa que el template exista, este aprobado y tenga el idioma configurado."
     if "access token" in text or "token" in text or "oauth" in text:

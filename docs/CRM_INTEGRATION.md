@@ -17,6 +17,20 @@ AgentKit calls:
 
 CRM remains the source of truth. AgentKit should not schedule templates or bypass queue safety. It proposes sales actions and sends messages/templates only when CRM calls transport endpoints.
 
+## Readiness
+
+AgentKit exposes `GET /readiness` for deploy checks. It safely reports:
+- provider and provider readiness
+- CRM configuration and reachability
+- `/api/agent/training-context` reachability
+- `/api/agent/whatsapp-automation` reachability
+- `/api/agent/tools` reachability
+- Meta configuration flags
+- Claude configuration flag
+- warnings without secrets
+
+CRM admins can call this indirectly from Settings > System Diagnostics > Test AgentKit.
+
 ## Agent Tool Registry
 
 AgentKit reads `GET /api/agent/tools` with `x-crm-api-key` and caches the safe tool list briefly. The registry tells AgentKit which actions are enabled, disabled, high-risk, or approval-gated.
@@ -34,3 +48,11 @@ Important tool keys:
 - `enroll_sequence`
 - `enqueue_template`
 - `pause_bot`
+
+## Key Matching
+
+Set these pairs to the same values:
+- CRM `CRM_API_KEY` = AgentKit `CRM_API_KEY`
+- CRM `AGENT_API_KEY` = AgentKit `AGENT_API_KEY`
+
+`CRM_API_KEY` protects CRM bridge reads/writes. `AGENT_API_KEY` protects AgentKit send endpoints called by CRM.

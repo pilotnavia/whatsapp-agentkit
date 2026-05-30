@@ -132,6 +132,73 @@ def health() -> dict[str, Any]:
     }
 
 
+def _crm_probe(path: str) -> dict[str, Any]:
+    try:
+        result = crm_client._request("GET", path)
+        return {"ok": True, "status": 200, "count": len(result) if isinstance(result, list) else None}
+    except CRMClientError as exc:
+        return {"ok": False, "status": exc.status, "error": str(exc)}
+
+
+@app.get("/readiness")
+def readiness() -> dict[str, Any]:
+    """Safe deployment readiness check for CRM, Meta, and Claude wiring."""
+    warnings: list[str] = []
+    provider = settings.whatsapp_provider
+    crm_configured = settings.crm_ready
+    meta_configured = bool(
+        settings.meta_access_token
+        and settings.meta_phone_number_id
+        and settings.meta_verify_token
+        and settings.meta_app_secret
+    )
+    if not crm_configured:
+        warnings.append("CRM_API_URL or CRM_API_KEY missing")
+    if provider == "meta" and not meta_configured:
+        warnings.append("Meta provider selected but one or more Meta env vars are missing")
+    if not settings.agent_api_key:
+        warnings.append("AGENT_API_KEY missing; CRM cannot call send endpoints")
+    if not anthropic_client.ready:
+        warnings.append("ANTHROPIC_API_KEY missing; local fallback brain will be used")
+
+    training_probe = {"ok": False, "skipped": not crm_configured}
+    automation_probe = {"ok": False, "skipped": not crm_configured}
+    tools_probe = {"ok": False, "skipped": not crm_configured}
+    if crm_configured:
+        training_probe = _crm_probe("/api/agent/training-context")
+        automation_probe = _crm_probe("/api/agent/whatsapp-automation")
+        tools_probe = _crm_probe("/api/agent/tools")
+        if not training_probe.get("ok"):
+            warnings.append("CRM training context unreachable")
+        if not automation_probe.get("ok"):
+            warnings.append("CRM automation context unreachable")
+        if not tools_probe.get("ok"):
+            warnings.append("CRM agent tools unreachable")
+
+    return {
+        "ok": bool(crm_configured and (provider != "meta" or meta_configured)),
+        "service": "club-commerce-whatsapp-agent",
+        "provider": provider,
+        "providerReady": settings.whatsapp_ready,
+        "crmConfigured": crm_configured,
+        "crmReachable": bool(training_probe.get("ok") or automation_probe.get("ok") or tools_probe.get("ok")),
+        "trainingContextReachable": bool(training_probe.get("ok")),
+        "automationContextReachable": bool(automation_probe.get("ok")),
+        "agentToolsReachable": bool(tools_probe.get("ok")),
+        "metaConfigured": meta_configured,
+        "tokenConfigured": bool(settings.meta_access_token),
+        "phoneNumberIdConfigured": bool(settings.meta_phone_number_id),
+        "verifyTokenConfigured": bool(settings.meta_verify_token),
+        "appSecretConfigured": bool(settings.meta_app_secret),
+        "graphVersion": settings.meta_graph_version,
+        "claudeConfigured": anthropic_client.ready,
+        "model": settings.anthropic_model if anthropic_client.ready else "fallback-local",
+        "agentApiKeyConfigured": bool(settings.agent_api_key),
+        "warnings": warnings,
+        "commit": runtime_commit(),
+    }
+
+
 @app.get("/debug/config")
 def debug_config() -> dict[str, Any]:
     """Non-secret runtime config for production dry runs."""

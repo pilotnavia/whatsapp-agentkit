@@ -14,6 +14,8 @@ WEB_SESSION_DEFAULT_SESSION_ID=closer_1
 AGENT_API_KEY=change_me_agent_key
 ```
 
+For deployed services, `WEB_SESSION_BRIDGE_URL` must be reachable from AgentKit. If AgentKit runs on Render and the bridge runs locally, `http://localhost:3100` points to the AgentKit container, not your computer. Deploy the bridge publicly or use a secure tunnel.
+
 Local run example:
 
 ```bash

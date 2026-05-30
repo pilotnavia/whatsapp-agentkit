@@ -37,6 +37,7 @@ class WebSessionWhatsAppProvider:
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "ClubCommerce-AgentKit/1.0",
         }
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
@@ -71,6 +72,7 @@ class WebSessionWhatsAppProvider:
     def health(self) -> dict[str, Any]:
         try:
             request = urllib.request.Request(f"{self.bridge_url}/health", headers={"Accept": "application/json"}, method="GET")
+            request.add_header("User-Agent", "ClubCommerce-AgentKit/1.0")
             with urllib.request.urlopen(request, timeout=min(self.timeout_seconds, 5)) as response:
                 raw = response.read().decode("utf-8") or "{}"
                 body = json.loads(raw)

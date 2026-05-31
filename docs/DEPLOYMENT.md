@@ -129,3 +129,4 @@ Meta POST messages:
 - AgentKit does not own scheduling. CRM queue/worker owns template scheduling and safety.
 - `/readiness` checks CRM bridge endpoints but does not call Meta Graph API.
 - Meta token validity is confirmed when a real send/webhook occurs.
+- Daily operations, readiness interpretation, and bridge troubleshooting are documented in `docs/OPERATIONS.md`.
